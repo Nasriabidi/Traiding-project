@@ -104,8 +104,8 @@ function handleLogout() {
       </div>
       <div class="logo text-center h-[80px] xl:!hidden !flex items-center justify-center">
         <router-link to="/">
-          <img class="inline-block w-[120px] hidden dark:block" src="/assets/img/logo/logo-s.png" alt="logo">
-          <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/logo-dark.png" alt="logo">
+          <img class="inline-block w-[120px] hidden dark:block" src="/assets/img/logo/logo-dark2.png" alt="logo">
+          <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/logo-dark2.png" alt="logo">
         </router-link>
       </div>
     </div>
@@ -161,7 +161,7 @@ function handleLogout() {
             <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
             <div class="content text-center">
 <div v-if="notifications.length === 0">
-  <p>No Notific4tion Here</p>
+  <p>No Notifiction Here</p>
 </div>
 <ul v-else>
   <li v-for="notif in notifications" :key="notif.id" class="text-left mb-3">
@@ -176,7 +176,7 @@ function handleLogout() {
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="user && user.photoURL ? user.photoURL : '/assets/img/author/author.jpeg'" alt="author">
+            <img class="w-[40px] h-[40px] rounded-full" :src="user && user.photoBase64 ? user.photoBase64 : (user && user.photoURL ? user.photoURL : '/assets/img/author/author.jpeg')" alt="author">
           </div>
           <div class="name ml-[15px]">
             {{ user && user.displayName ? user.displayName : 'User' }}
@@ -198,7 +198,9 @@ function handleLogout() {
             <ul>
               <li class="border-b border-[#DFE5F2]">
                 <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ user && user.email ? user.email : 'No email' }}
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ user && user.email ? user.email : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
@@ -236,13 +238,29 @@ function handleLogout() {
   <aside class="sidebar" :class="[isSidebar ? 'sidebar' : 'sidebar-toggle xl:!w-[73px]', isMenubar ? '!left-0' : '']">
     <div class="logo text-center h-[80px] flex items-center justify-center">
       <router-link to="/">
-        <img class="inline-block w-[120px]" src="/assets/img/logo/logo-s.png" alt="logo">
+        <img class="inline-block h-[50px]" src="/assets/img/logo/logo-s.png" alt="logo">
       </router-link>
     </div>
-    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="user && user.photoURL ? user.photoURL : '/assets/img/author/author.jpeg'" alt="author">
+    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center mb-4">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="user && user.photoBase64 ? user.photoBase64 : (user && user.photoURL ? user.photoURL : '/assets/img/author/author.jpeg')" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ user && user.displayName ? user.displayName : 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ user && user.email ? user.email : 'No email' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">
@@ -354,8 +372,10 @@ function handleLogout() {
     <div class="sidebar-shape-2"></div>
   </aside>
   <main class="content-wrapper" :class="isSidebar ? 'content-wrapper' : 'xl:!pl-[73px]'">
-    <div class="dashboard-info">
-      This is a sample dashboard, start trading for real data.
+    <div v-if="user && user.email === 'admin@admin.com'" class="mb-4">
+      <button @click="router.push('/admin-dashboard')" class="bg-green-600 text-white px-4 py-2  rounded hover:bg-green-700 transition">
+        Go to Admin Dashboard
+      </button>
     </div>
     <div class="inner-content">
       <div class="breadcrumb-wrap">
@@ -442,7 +462,7 @@ function handleLogout() {
                         </div>
                         <div class="info-item">
                           <h4>Photo</h4>
-                          <img v-if="user && user.photoURL" :src="user.photoURL" alt="User Photo" class="w-12 h-12 rounded-full" />
+                          <img v-if="user && (user.photoBase64 || user.photoURL)" :src="user.photoBase64 ? user.photoBase64 : user.photoURL" alt="User Photo" class="w-12 h-12 rounded-full" />
                           <span v-else>N/A</span>
                         </div>
                       </div>

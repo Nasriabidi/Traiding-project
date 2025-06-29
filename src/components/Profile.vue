@@ -1,10 +1,142 @@
 <script setup>
+import { ref, onMounted } from 'vue';
 import { useDark, useToggle } from '@vueuse/core';
 import { useUserStore } from '../stores/userStore';
+import { auth, db } from '../firebase/config';
+import { updateProfile, updateEmail, updatePassword } from 'firebase/auth';
+import { doc, updateDoc } from 'firebase/firestore';
+import { useRouter } from 'vue-router';
 
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
 const userStore = useUserStore();
+
+// Edit profile state
+const firstName = ref('');
+const lastName = ref('');
+const email = ref('');
+const photoPreview = ref('');
+const photoBase64 = ref('');
+const loading = ref(false);
+const error = ref('');
+const success = ref('');
+const newPassword = ref('');
+const confirmNewPassword = ref('');
+const loadingPassword = ref(false);
+const passwordError = ref('');
+const passwordSuccess = ref('');
+const router = useRouter();
+
+function handleLogout() {
+  localStorage.removeItem('user');
+  userStore.setUser(null);
+  router.push('/login');
+}
+
+
+const onPhotoChange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    error.value = 'Image size should be less than 5MB.';
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    error.value = 'Please select a valid image file.';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    photoPreview.value = ev.target.result;
+    photoBase64.value = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+const handleProfileUpdate = async () => {
+  error.value = '';
+  success.value = '';
+  loading.value = true;
+  try {
+    // Prepare updated fields
+    const updatedFields = {};
+    let newDisplayName = userStore.user?.displayName || '';
+    // Only update fields that are filled
+    if (firstName.value || lastName.value) {
+      const currentFirst = firstName.value || userStore.user?.firstName || '';
+      const currentLast = lastName.value || userStore.user?.lastName || '';
+      newDisplayName = `${currentFirst} ${currentLast}`.trim();
+      updatedFields.firstName = firstName.value || userStore.user?.firstName || '';
+      updatedFields.lastName = lastName.value || userStore.user?.lastName || '';
+      updatedFields.displayName = newDisplayName;
+    }
+    if (email.value) {
+      updatedFields.email = email.value;
+    }
+    if (photoBase64.value) {
+      updatedFields.photoBase64 = photoBase64.value;
+    }
+    // Update Firebase Auth profile
+    if (auth.currentUser) {
+      await updateProfile(auth.currentUser, {
+        displayName: updatedFields.displayName || userStore.user?.displayName || '',
+        photoURL: userStore.user?.photoURL || '',
+      });
+      if (email.value && email.value !== userStore.user?.email) {
+        await updateEmail(auth.currentUser, email.value);
+      }
+    }
+    // Update Firestore user document
+    if (userStore.user?.uid && Object.keys(updatedFields).length > 0) {
+      const userRef = doc(db, 'users', userStore.user.uid);
+      await updateDoc(userRef, updatedFields);
+    }
+    // Update Pinia store
+    userStore.setUser({
+      ...userStore.user,
+      ...updatedFields,
+    });
+    success.value = 'Profile updated successfully!';
+    // Clear only the fields that were filled
+    if (firstName.value) firstName.value = '';
+    if (lastName.value) lastName.value = '';
+    if (email.value) email.value = '';
+    if (photoPreview.value) photoPreview.value = '';
+    if (photoBase64.value) photoBase64.value = '';
+  } catch (err) {
+    error.value = err.message || 'Failed to update profile.';
+  } finally {
+    loading.value = false;
+  }
+};
+
+const handlePasswordChange = async () => {
+  passwordError.value = '';
+  passwordSuccess.value = '';
+  loadingPassword.value = true;
+  if (newPassword.value !== confirmNewPassword.value) {
+    passwordError.value = 'Passwords do not match.';
+    loadingPassword.value = false;
+    return;
+  }
+  if (newPassword.value.length < 6) {
+    passwordError.value = 'Password must be at least 6 characters.';
+    loadingPassword.value = false;
+    return;
+  }
+  try {
+    if (auth.currentUser) {
+      await updatePassword(auth.currentUser, newPassword.value);
+      passwordSuccess.value = 'Password changed successfully!';
+      newPassword.value = '';
+      confirmNewPassword.value = '';
+    }
+  } catch (err) {
+    passwordError.value = err.message || 'Failed to change password.';
+  } finally {
+    loadingPassword.value = false;
+  }
+};
 </script>
 <template>
   <header class="header-area" :class="isSidebar ? 'header-area' : 'xl:!w-[calc(100%-73px)] xl:!ml-[73px]'">
@@ -68,7 +200,7 @@ const userStore = useUserStore();
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+            <img class="w-[40px] h-[40px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
           </div>
           <div class="name ml-[15px]">
             {{ userStore.user?.displayName || 'User' }}
@@ -90,7 +222,9 @@ const userStore = useUserStore();
             <ul>
               <li class="border-b border-[#DFE5F2]">
                 <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ userStore.user?.email || '' }}
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ userStore.user && userStore.user.email ? userStore.user?.email  : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
@@ -103,12 +237,15 @@ const userStore = useUserStore();
                 </router-link>
               </li>
               <li class="group">
-                <router-link to="/login" class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary">
+                <button
+                  @click="handleLogout"
+                  class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary w-full text-left"
+                >
                   <svg class="w-[22px] h-[22px] mr-[10px] fill-[#4A485F] transition-all duration-350 ease-linear group-hover:!fill-primary dark:fill-white dark:group-hover:!fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M14 6v15H3v-2h2V3h9v1h5v15h2v2h-4V6h-3zm-4 5v2h2v-2h-2z"></path>
                   </svg>
                   Logout
-                </router-link>
+                </button>
               </li>
             </ul>
           </div>
@@ -131,9 +268,25 @@ const userStore = useUserStore();
       </router-link>
     </div>
     <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ userStore.user?.displayName || 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ userStore.user?.email || '' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">
@@ -236,9 +389,6 @@ const userStore = useUserStore();
     <div class="sidebar-shape-2"></div>
   </aside>
   <main class="content-wrapper" :class="isSidebar ? 'content-wrapper' : 'xl:!pl-[73px]'">
-    <div class="dashboard-info">
-      This is a sample dashboard, start trading for real data.
-    </div>
     <div class="inner-content">
       <div class="breadcrumb-wrap">
         <div class="breadcrumb-title">
@@ -256,27 +406,7 @@ const userStore = useUserStore();
               <div class="w-full px-[15px]">
                 <div class="py-[30px] mb-[30px] rounded-[10px] bg-[#F5F9FF] relative z-10 overflow-hidden dark:bg-dark">
                   <div class="author-head text-center md:px-[30px] mb-[20px]">
-                    <div class="thumb w-[100px] h-[100px] mx-auto relative  mb-[10px]">
-                      <img class="rounded-[5px]" src="/assets/img/author/author-2.jpeg" alt="author">
-                      <button
-                          class="w-[24px] h-[24px] bg-dark flex items-center justify-center rounded-[5px] absolute -bottom-0.5 right-0">
-                        <svg class="w-[15px] h-[15px] fill-white" focusable="false" viewBox="0 0 24 24"
-                             aria-hidden="true">
-                          <path
-                              d="M14.06 9.02l.92.92L5.92 19H5v-.92l9.06-9.06M17.66 3c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29zm-3.6 3.19L3 17.25V21h3.75L17.81 9.94l-3.75-3.75z"></path>
-                        </svg>
-                      </button>
-                    </div>
-                    <h4 class="text-dark font-semibold 2xl:text-[18px] text-[14px] dark:text-white">mikha dev</h4>
-                    <p class="text-dark 2xl:text-[18px] text-[14px] mb-[10px] dark:text-white/70">mikha.dev@gmail.com</p>
-                    <p class="text-primary text-[13px] flex items-center justify-center">
-                      <svg class="w-[14px] h-[14px] fill-primary mr-[5px]" focusable="false" viewBox="0 0 24 24"
-                           aria-hidden="true">
-                        <path
-                            d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"></path>
-                      </svg>
-                      Resend verify email
-                    </p>
+                    <!-- Removed static profile info (mikha dev, email, resend verify email) -->
                   </div>
                   <div class="author-tab">
                     <button
@@ -306,125 +436,66 @@ const userStore = useUserStore();
           <div class="xl:w-9/12 lg:w-9/12 w-full px-[15px]">
             <div :class="{'hidden': openTab !== 1, 'block': openTab === 1}">
               <div class="card-wrap">
-                <h3 class="card-title">Personal Infomation</h3>
+                <h3 class="card-title">Personal Information</h3>
                 <div class="content">
-                  <div class="author-form">
+                  <form @submit.prevent="handleProfileUpdate">
                     <div class="flex flex-wrap mx-[-15px]">
+                      <div class="w-full flex flex-col items-center mb-[30px]">
+                        <img :src="photoPreview || userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" class="w-24 h-24 rounded-full object-cover mb-2" alt="Profile Photo">
+                        <input type="file" accept="image/*" @change="onPhotoChange" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-700" />
+                      </div>
                       <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
                         <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="user">
+                          <input v-model="firstName" class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent" type="text" placeholder="First Name">
                         </div>
                       </div>
                       <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
                         <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="user">
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap relative mb-[30px]">
-                          <select
-                              class="absolute left-0 top-0 xl:w-[180px] w-[120px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] xl:px-[30px] px-[15px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent appearance-none">
-                            <option>Mobile Code</option>
-                            <option>+93 (FA)</option>
-                            <option>+93 (FA)</option>
-                            <option>+93 (FA)</option>
-                            <option>+93 (FA)</option>
-                          </select>
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="joey">
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <select
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent appearance-none">
-                            <option>Canada</option>
-                            <option>USA</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <select
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent appearance-none">
-                            <option>Select Gender</option>
-                            <option>Male</option>
-                            <option>Female</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="City">
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="Street">
-                        </div>
-                      </div>
-                      <div class="xl:w-6/12 lg:w-6/12 w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="text" placeholder="Postal Code">
+                          <input v-model="lastName" class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent" type="text" placeholder="Last Name">
                         </div>
                       </div>
                       <div class="w-full px-[15px]">
-                        <div class="input-wrap mb-[30px] text-end">
-                          <button class="w-[150px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-white text-center bg-primary rounded-[10px]">Save
-                          </button>
+                        <div class="input-wrap mb-[30px]">
+                          <input v-model="email" class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent" type="email" placeholder="Email">
                         </div>
                       </div>
+                      <div class="w-full px-[15px] text-end">
+                        <button type="submit" :disabled="loading" class="w-[150px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-white text-center bg-primary rounded-[10px]">Save</button>
+                      </div>
+                      <div class="w-full px-[15px]">
+                        <p v-if="error" class="text-red-500 mt-2">{{ error }}</p>
+                        <p v-if="success" class="text-green-600 mt-2">{{ success }}</p>
+                      </div>
                     </div>
-                  </div>
+                  </form>
                 </div>
               </div>
             </div>
             <div :class="{'hidden': openTab !== 2, 'block': openTab === 2}">
               <div class="card-wrap">
-                <h3 class="card-title">Account Infomation</h3>
+                <h3 class="card-title">Account Information</h3>
                 <div class="content">
-                  <div class="author-form">
+                  <form @submit.prevent="handlePasswordChange">
                     <div class="flex flex-wrap mx-[-15px]">
                       <div class="w-full px-[15px]">
                         <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="password" placeholder="Current Password*">
+                          <input v-model="newPassword" class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent" type="password" placeholder="New Password*" required minlength="6">
                         </div>
                       </div>
                       <div class="w-full px-[15px]">
                         <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="password" placeholder="New Password*">
+                          <input v-model="confirmNewPassword" class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent" type="password" placeholder="Confirm New Password*" required minlength="6">
                         </div>
                       </div>
-                      <div class="w-full px-[15px]">
-                        <div class="input-wrap mb-[30px]">
-                          <input
-                              class="w-full xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-dark border border-[#dad7ff] px-[30px] outline-0 rounded-[10px] focus:border-primary placeholder-dark/60 focus:placeholder-transparent"
-                              type="password" placeholder="Confirm New Password*">
-                        </div>
+                      <div class="w-full px-[15px] text-end">
+                        <button type="submit" :disabled="loadingPassword" class="w-[150px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-white text-center bg-primary rounded-[10px]">Save</button>
                       </div>
                       <div class="w-full px-[15px]">
-                        <div class="input-wrap mb-[30px] text-end">
-                          <button class="w-[150px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-white text-center bg-primary rounded-[10px]">Save
-                          </button>
-                        </div>
+                        <p v-if="passwordError" class="text-red-500 mt-2">{{ passwordError }}</p>
+                        <p v-if="passwordSuccess" class="text-green-600 mt-2">{{ passwordSuccess }}</p>
                       </div>
                     </div>
-                  </div>
+                  </form>
                 </div>
               </div>
             </div>

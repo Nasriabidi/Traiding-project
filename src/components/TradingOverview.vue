@@ -1,9 +1,256 @@
 <script setup>
+// --- Trading Interface Additions ---
+import { addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+
+const marketPairs = [
+  { label: 'BTC/USDT', symbol: 'BTCUSDT' },
+  { label: 'ETH/USDT', symbol: 'ETHUSDT' },
+  { label: 'SOL/USDT', symbol: 'SOLUSDT' },
+];
+const leverages = [1, 5, 10, 20,  50, 75, 100];
+const selectedPair = ref(marketPairs[0]);
+const selectedLeverage = ref(leverages[0]);
+const buyDisabled = ref(false);
+const sellDisabled = ref(false);
+const orderBook = ref({ bids: [], asks: [] });
+const currentPrice = ref(0);
+const priceInterval = ref(null);
+const sessionId = ref(null);
+const sessionData = ref(null);
+const finalPrice = ref(null);
+const sessionClosedMessage = ref(null);
+
+// Try to restore session from localStorage
+
+onMounted(() => {
+  const saved = localStorage.getItem('traid_session');
+  if (saved) {
+    const { id, data, selectedPair: savedPair, selectedLeverage: savedLev, disabledButton } = JSON.parse(saved);
+    sessionId.value = id;
+    sessionData.value = data;
+    // Restore selected market and leverage
+    if (savedPair) {
+      const foundPair = marketPairs.find(p => p.symbol === savedPair.symbol);
+      if (foundPair) selectedPair.value = foundPair;
+    }
+    if (savedLev) {
+      selectedLeverage.value = savedLev;
+    }
+    // Restore disabled button state
+    if (disabledButton === 'buy') buyDisabled.value = true;
+    if (disabledButton === 'sell') sellDisabled.value = true;
+    startPriceInterval();
+  }
+});
+
+function getUserBalance() {
+  // Try to get balance from userStore
+  return userStore.user?.balance || 10000; // fallback demo balance
+}
+
+
+async function handleTrade(type) {
+  // If session is active, only allow closing with the opposite button
+  if (sessionId.value && sessionData.value && !sessionData.value.sessionend) {
+    // Only allow closing with the opposite type
+    if (type !== (sessionData.value.type === 'buy' ? 'sell' : 'buy')) return;
+    await handleCloseSession();
+    return;
+  }
+  if (type === 'buy') buyDisabled.value = true;
+  if (type === 'sell') sellDisabled.value = true;
+  const balance = getUserBalance();
+  const leverage = selectedLeverage.value;
+  const pair = selectedPair.value;
+  // Calculate sessionbalance as a fraction of balance
+  const sessionFraction = leverage / 100;
+  // Get current price from Binance
+  let openPrice = currentPrice.value;
+  if (!openPrice) {
+    openPrice = await fetchCurrentPrice(pair.symbol);
+  }
+  const docData = {
+    userId: userStore.user?.uid,
+    opentime: serverTimestamp(),
+    profit: 0,
+    initialbalance: balance,
+    sessionend: false,
+    sessionbalance: balance * sessionFraction,
+    type,
+    cryptopair: pair.label,
+    stop: false,
+    finalprice: 0,
+    openprice: openPrice,
+    leverage,
+  };
+  // Create Firestore doc
+  const docRef = await addDoc(collection(db, 'traidsession'), docData);
+  sessionId.value = docRef.id;
+  sessionData.value = docData;
+  // Save to localStorage, including UI state
+  localStorage.setItem('traid_session', JSON.stringify({
+    id: docRef.id,
+    data: docData,
+    selectedPair: selectedPair.value,
+    selectedLeverage: selectedLeverage.value,
+    disabledButton: type
+  }));
+  startPriceInterval();
+}
+
+// Close session logic
+async function handleCloseSession() {
+  if (!sessionId.value || !sessionData.value || sessionData.value.sessionend) return;
+  // Get close time and periode
+  const closetime = Date.now();
+  let opentime = sessionData.value.opentime;
+  // If opentime is a Firestore Timestamp, convert to ms
+  if (opentime && opentime.seconds) {
+    opentime = opentime.seconds * 1000;
+  }
+  const periode = opentime ? closetime - opentime : 0;
+  // Commission fixed
+  const commission = 0.01;
+  // Get final price
+  let closePrice = currentPrice.value;
+  if (!closePrice) {
+    closePrice = await fetchCurrentPrice(selectedPair.value.symbol);
+  }
+  // Use profit as already fetched from Firestore (sessionData.value.profit)
+  const profit = sessionData.value.profit || 0;
+  // Update balance
+  let balance = getUserBalance();
+  balance = balance + profit - (profit * commission);
+  // Update Firestore session
+  await updateDoc(doc(db, 'traidsession', sessionId.value), {
+    closetime: new Date(closetime),
+    periode,
+    commission,
+    finalprice: closePrice,
+    sessionend: true,
+    stop: true,
+    closeprice: closePrice
+  });
+
+  // Update user balance in Firestore
+  if (userStore.user && userStore.user.uid) {
+    try {
+      await updateDoc(doc(db, 'users', userStore.user.uid), {
+        balance: balance
+      });
+      // Also update in Pinia store if needed
+      userStore.setUser({ ...userStore.user, balance });
+    } catch (e) {
+      // handle error if needed
+    }
+  }
+
+  // Remove session from localStorage
+  localStorage.removeItem('traid_session');
+
+  // Show session closed message with profit
+  sessionClosedMessage.value = `Session closed. Your profit is $${profit.toFixed(2)}`;
+
+  // Reset all session/UI state and clear intervals for a clean new session
+  sessionId.value = null;
+  sessionData.value = null;
+  buyDisabled.value = false;
+  sellDisabled.value = false;
+  finalPrice.value = null;
+  if (priceInterval.value) {
+    clearInterval(priceInterval.value);
+    priceInterval.value = null;
+  }
+  // Optionally reset selectedPair and selectedLeverage to defaults if you want a full reset:
+  // selectedPair.value = marketPairs[0];
+  // selectedLeverage.value = leverages[0];
+
+  // Hide the message after a few seconds
+  setTimeout(() => {
+    sessionClosedMessage.value = null;
+  }, 6000);
+}
+
+function startPriceInterval() {
+  if (priceInterval.value) clearInterval(priceInterval.value);
+  priceInterval.value = setInterval(async () => {
+    if (!sessionId.value || !sessionData.value) return;
+    const pair = selectedPair.value;
+    const price = await fetchCurrentPrice(pair.symbol);
+    currentPrice.value = price;
+    await fetchOrderBook(pair.symbol);
+    // If session is not stopped, update Firestore session with current price
+    if (sessionData.value.stop === false) {
+      await updateDoc(doc(db, 'traidsession', sessionId.value), {
+        currentprice: price
+      });
+    }
+  }, 10000);
+}
+
+async function fetchCurrentPrice(symbol) {
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    const data = await res.json();
+    return parseFloat(data.price);
+  } catch (e) {
+    return 0;
+  }
+}
+
+async function fetchOrderBook(symbol) {
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=10`);
+    const data = await res.json();
+    orderBook.value = {
+      bids: data.bids.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+      asks: data.asks.map(([price, qty]) => ({ price: parseFloat(price), qty: parseFloat(qty) })),
+    };
+  } catch (e) {
+    orderBook.value = { bids: [], asks: [] };
+  }
+}
+
+// Watch for pair change to update price/orderbook
+watch(selectedPair, async (pair) => {
+  currentPrice.value = await fetchCurrentPrice(pair.symbol);
+  await fetchOrderBook(pair.symbol);
+});
+
+onMounted(async () => {
+  currentPrice.value = await fetchCurrentPrice(selectedPair.value.symbol);
+  await fetchOrderBook(selectedPair.value.symbol);
+});
 
 import { useDark, useToggle } from '@vueuse/core';
 import { storeToRefs } from 'pinia';
 import { useUserStore } from '../stores/userStore';
 import { ref, onMounted, watch } from 'vue';
+import { getDoc, onSnapshot } from 'firebase/firestore';
+// For displaying final price in order book
+
+// Watch Firestore session doc for stop changes in real time
+let sessionUnsub = null;
+watch(sessionId, (id) => {
+  if (sessionUnsub) {
+    sessionUnsub();
+    sessionUnsub = null;
+  }
+  if (id) {
+    sessionUnsub = onSnapshot(doc(db, 'traidsession', id), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        sessionData.value = data;
+        if (data.stop === true && priceInterval.value) {
+          clearInterval(priceInterval.value);
+          priceInterval.value = null;
+          finalPrice.value = data.finalprice;
+          currentPrice.value = data.finalprice;
+        }
+      }
+    });
+  }
+});
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useRouter } from 'vue-router';
@@ -117,7 +364,11 @@ const toggleDark = useToggle(isDark);
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+            <img
+              class="w-[40px] h-[40px] rounded-full object-cover"
+              :src="userStore.user && userStore.user.photoBase64 ? userStore.user.photoBase64 : (userStore.user && userStore.user.photoURL ? userStore.user.photoURL : '/assets/img/author/author.jpeg')"
+              alt="author"
+            >
           </div>
           <div class="name ml-[15px]">
             {{ userStore.user?.displayName || 'User' }}
@@ -139,7 +390,9 @@ const toggleDark = useToggle(isDark);
             <ul>
               <li class="border-b border-[#DFE5F2]">
                 <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ userStore.user?.email || '' }}
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ userStore.user && userStore.user.email ? userStore.user?.email  : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
@@ -182,10 +435,26 @@ const toggleDark = useToggle(isDark);
         <img class="inline-block h-[50px]" src="/assets/img/logo/logo-s.png" alt="logo">
       </router-link>
     </div>
-    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center mb-4">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ userStore.user?.displayName || 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ userStore.user?.email || '' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">
@@ -310,264 +579,100 @@ const toggleDark = useToggle(isDark);
           Trading Overview
         </div>
       </div>
+      <div v-if="sessionClosedMessage" class="mb-4 p-4 rounded bg-green-100 text-green-800 font-semibold text-center border border-green-300">
+        {{ sessionClosedMessage }}
+      </div>
       <div class="dashboard-wrapper">
+        <!-- CRYPTO TRADING INTERFACE -->
+        <div class="card-wrap mb-8">
+          <div class="flex flex-wrap gap-4 items-center justify-between">
+            <div class="flex flex-col gap-2">
+              <label class="font-semibold text-dark dark:text-white">Market</label>
+              <select v-model="selectedPair" class="rounded border px-3 py-2">
+                <option v-for="pair in marketPairs" :key="pair.symbol" :value="pair">{{ pair.label }}</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="font-semibold text-dark dark:text-white">Leverage</label>
+              <select v-model="selectedLeverage" class="rounded border px-3 py-2">
+                <option v-for="lev in leverages" :key="lev" :value="lev">{{ lev }}X</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="font-semibold text-dark dark:text-white">Current Price</label>
+              <div class="text-lg font-bold">{{ currentPrice ? currentPrice.toLocaleString() : '...' }}</div>
+            </div>
+            <div class="flex gap-2 items-end">
+<button
+  :disabled="
+    (sessionId && sessionData && !sessionData.sessionend && sessionData.type === 'buy') || buyDisabled
+  "
+  @click="handleTrade('buy')"
+  class="px-6 py-2 rounded bg-green-500 text-white font-bold disabled:opacity-50"
+>
+  Buy
+</button>
+<button
+  :disabled="
+    (sessionId && sessionData && !sessionData.sessionend && sessionData.type === 'sell') || sellDisabled
+  "
+  @click="handleTrade('sell')"
+  class="px-6 py-2 rounded bg-red-500 text-white font-bold disabled:opacity-50"
+>
+  Sell
+</button>
+            </div>
+          </div>
+          <div class="mt-6 flex flex-col md:flex-row gap-6">
+            <div class="flex-1">
+              <h4 class="font-semibold mb-2 text-dark dark:text-white">Order Book (Top 10)</h4>
+              <div class="flex gap-4">
+                <div class="flex-1">
+                  <div class="text-xs font-bold text-green-600 mb-1">Bids</div>
+                  <div v-if="finalPrice !== null" class="flex justify-between text-green-700 text-xs">
+                    <span>{{ finalPrice }}</span>
+                    <span>
+                      {{
+                        orderBook.bids.length > 0
+                          ? (orderBook.bids[0].qty + 0.1).toLocaleString(undefined, {
+                              minimumFractionDigits: orderBook.bids[0].qty.toString().split('.')[1]?.length || 0,
+                              maximumFractionDigits: orderBook.bids[0].qty.toString().split('.')[1]?.length || 0
+                            })
+                          : '1.00'
+                      }}
+                    </span>
+                  </div>
+                  <div v-for="bid in orderBook.bids" :key="bid.price" class="flex justify-between text-green-700 text-xs">
+                    <span>{{ bid.price }}</span>
+                    <span>{{ bid.qty }}</span>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <div class="text-xs font-bold text-red-600 mb-1">Asks</div>
+                  <div v-if="finalPrice !== null" class="flex justify-between text-red-700 text-xs">
+                    <span>{{ finalPrice }}</span>
+                    <span>
+                      {{
+                        orderBook.asks.length > 0
+                          ? (orderBook.asks[0].qty + 0.1).toLocaleString(undefined, {
+                              minimumFractionDigits: orderBook.asks[0].qty.toString().split('.')[1]?.length || 0,
+                              maximumFractionDigits: orderBook.asks[0].qty.toString().split('.')[1]?.length || 0
+                            })
+                          : '1.00'
+                      }}
+                    </span>
+                  </div>
+                  <div v-for="ask in orderBook.asks" :key="ask.price" class="flex justify-between text-red-700 text-xs">
+                    <span>{{ ask.price }}</span>
+                    <span>{{ ask.qty }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="flex flex-wrap mx-[-15px]">
           <div class="xl:w-8/12 lg:w-7/12 w-full px-[15px]">
-            <!-- trading objectives start-->
-            <div class="flex flex-wrap mx-[-15px]">
-              <div class="w-full px-[15px]">
-                <div class="card-wrap">
-                  <h3 class="card-title">Trading Objectives</h3>
-                  <div class="content">
-                    <!-- trading-row start-->
-                    <div class="flex flex-wrap mx-[-15px]">
-                      <div class="xl:w-6/12 w-full px-[15px]">
-                        <!-- trading-card start-->
-                        <div class="bg-white p-[30px] rounded-[15px] mb-[30px] dark:bg-toggle">
-                          <p class="text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[20px] dark:text-white">
-                            Minimum Trading Days
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark/70 ml-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Minimum</span>
-                            <span>10 days</span>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Current Result</span>
-                            <span class="text-primary">2 days</span>
-                          </p>
-                          <p>
-                            <span class="text-primary bg-primary/20 text-[14px] py-[6px] px-[16px] rounded-[5px]">Ongoing</span>
-                          </p>
-                        </div>
-                        <!-- trading-card end-->
-                      </div>
-                      <div class="xl:w-6/12 w-full px-[15px]">
-                        <!-- trading-card start-->
-                        <div class="bg-white p-[30px] rounded-[15px] mb-[30px] dark:bg-toggle">
-                          <p class="text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[20px] dark:text-white">
-                            Daily Loss Limit
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark/70 ml-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Max. Loss</span>
-                            <span>$1250</span>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Max. Loss recorded</span>
-                            <span class="text-primary">$1000</span>
-                          </p>
-                          <p>
-                            <span class="text-primary bg-primary/20 text-[14px] py-[6px] px-[16px] rounded-[5px]">Ongoing</span>
-                          </p>
-                        </div>
-                        <!-- trading-card end-->
-                      </div>
-                      <div class="xl:w-6/12 w-full px-[15px]">
-                        <!-- trading-card start-->
-                        <div class="bg-white p-[30px] rounded-[15px] dark:bg-toggle">
-                          <p class="text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[20px] dark:text-white">
-                            Monthy Loss Limit
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark/70 ml-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Max. Loss</span>
-                            <span>$2750</span>
-                          </p>
-                          <p class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] mb-[15px] dark:text-white">
-                            <span>Max. Loss recorded</span>
-                            <span class="text-primary">$1500</span>
-                          </p>
-                          <p>
-                            <span class="text-primary bg-primary/20 text-[14px] py-[6px] px-[16px] rounded-[5px]">Ongoing</span>
-                          </p>
-                        </div>
-                        <!-- trading-card end-->
-                      </div>
-                    </div>
-                    <!-- trading-row end-->
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!-- trading objectives end-->
-            <!-- loss start-->
-            <div class="flex flex-wrap mx-[-15px]">
-              <div class="xl:w-6/12 w-full px-[15px]">
-                <!-- today-loss start-->
-                <div class="card-wrap">
-                  <h3 class="card-title">Trading Growth Curve</h3>
-                  <div class="content">
-                    <div
-                        class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] border-b border-[#000]/10 pb-[10px] mb-[10px] dark:text-white">
-                      <p class="inline-flex items-center">
-                        <svg class="inline-block w-[20px] h-[20px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                        Today's Permitted Loss
-                      </p>
-                      <p class="text-primary bg-primary/20 text-[18px] font-bold py-[6px] px-[16px] rounded-[5px] dark:text-white dark:bg-primary">
-                        $750</p>
-                    </div>
-                    <div
-                        class="flex flex-wrap items-center justify-between text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                      <p class="inline-flex items-center">
-                        <svg class="inline-block w-[20px] h-[20px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                        Max Permitted Loss
-                      </p>
-                      <p class="text-primary bg-primary/20 text-[18px] font-bold py-[6px] px-[16px] rounded-[5px] dark:text-white dark:bg-primary">
-                        $1500
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <!-- today-loss end-->
-              </div>
-              <div class="xl:w-6/12 w-full px-[15px]">
-                <!-- lose-counter start-->
-                <div class="card-wrap">
-                  <h3 class="card-title text-center">Today's Permitted Loss Will Reset In</h3>
-                  <div class="content text-center py-[30px]">
-                    <div class="lose-counter inline-block text-white bg-primary py-[5px] px-[15px] rounded-[5px]">
-                      <span class="hour">-2</span>:<span class="minute">56</span>:<span class="second">29</span>
-                    </div>
-                  </div>
-                </div>
-                <!-- lose-counter end-->
-              </div>
-            </div>
-            <!-- loss end-->
-
-            <!-- consistency start-->
-            <div class="flex flex-wrap mx-[-15px]">
-              <div class="w-full px-[15px]">
-                <div class="card-wrap">
-                  <h3 class="card-title">Consistency</h3>
-                  <div class="content overflow-hidden">
-                    <!-- consistency-table start-->
-                    <div class="consistency-wrap overflow-x-auto">
-                      <div class="responsive-wrap 2xl:min-w-full xl:min-w-[1000px] lg:min-w-[1100px] min-w-[1100px]">
-                        <div
-                            class="heading grid grid-cols-[1fr_1fr_1fr_1fr_1fr_1.2fr] border-b border-[#000]/10 py-[10px]">
-                          <p class=" text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Consistency
-                          </p>
-                          <p class="inline-flex items-center text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Current Avg.
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="inline-flex items-center text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Overall Avg.
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="inline-flex items-center text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Upper Limit
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="inline-flex items-center text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Lower Limit
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                          <p class="inline-flex items-center text-dark md:text-[18px] text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                            Standard Deviation
-                            <svg class="inline-block w-[17px] h-[17px] fill-dark mr-[5px] dark:fill-white" focusable="false"
-                                 viewBox="0 0 24 24"
-                                 aria-hidden="true">
-                              <path
-                                  d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            </svg>
-                          </p>
-                        </div>
-                        <div
-                            class="content grid grid-cols-[1fr_1fr_1fr_1fr_1fr_1.2fr] border-b border-[#000]/10 py-[10px]">
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            Trade
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            8.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            12.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            30.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            4.80
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            2
-                          </p>
-                        </div>
-                        <div class="content grid grid-cols-[1fr_1fr_1fr_1fr_1fr_1.2fr] py-[10px]">
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            Lot
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            30.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            22.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            55.00
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            8.80
-                          </p>
-                          <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                            2
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <!-- consistency-table end-->
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!-- consistency end-->
           </div>
           <div class="xl:w-4/12 lg:w-5/12 w-full px-[15px]">
             <!--  Account Growth-->

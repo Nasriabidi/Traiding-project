@@ -113,13 +113,30 @@ const router = createRouter({
 // Simple navigation guard for authentication
 router.beforeEach((to, from, next) => {
     // Example: check localStorage for auth (replace with your real auth logic)
-    const isAuthenticated = !!localStorage.getItem('user');
+    const userStr = localStorage.getItem('user');
+    const isAuthenticated = !!userStr;
+    let userEmail = null;
+    if (userStr) {
+        try {
+            userEmail = JSON.parse(userStr).email;
+        } catch (e) {
+            userEmail = null;
+        }
+    }
+
     if (!isAuthenticated && to.name !== 'Login' && to.name !== 'Register' && to.name !== 'ForgotPassword') {
         // If not authenticated, redirect to login (but allow register and forgot-password)
         next({ name: 'Login' });
     } else if (isAuthenticated && (to.name === 'Login' || to.name === 'Register' || to.name === 'ForgotPassword')) {
         // If authenticated and trying to access login, register, or forgot-password, redirect to home
         next({ name: 'Home' });
+    } else if (to.name === 'AdminDashboard') {
+        // Only allow admin@admin to access admin dashboard
+        if (userEmail === 'admin@admin.com') {
+            next();
+        } else {
+            next({ name: 'Home' });
+        }
     } else {
         next();
     }

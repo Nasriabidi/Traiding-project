@@ -132,29 +132,6 @@ defineExpose({ router });
           <!-- login heading end -->
           <!-- login form start -->
           <form @submit="handleLogin" class="login-form mt-[48px]">
-            <!-- google & facebook start -->
-            <div class="flex xl:flex-nowrap lg:flex-wrap md:flex-nowrap flex-wrap items-center gap-[20px]">
-              <div class="xl:w-6/12 lg:w-full md:w-6/12 w-full">
-                <a href="#"
-                   class="flex justify-center items-center py-[5px] px-[15px] bg-[#0B9201]/20 border border-[#0B9201] text-dark xl:text-[16px] text-[14px] lg:h-[70px] h-[60px] rounded-[10px] transition duration-300 ease-linear hover:bg-[#0B9201]/10 hover:border-[#0B9201]/10 hover:text-[#0B9201] dark:bg-[#0B9201]/50 dark:text-white">
-                  <img class="mr-[15px] xl:w-[22px] w-[15px]" src="/assets/img/icon/google.svg" alt="google">
-                  Login with Google
-                </a>
-              </div>
-              <div class="xl:w-6/12 lg:w-full md:w-6/12 w-full">
-                <a href="#"
-                   class="flex justify-center items-center py-[5px] px-[15px] bg-[#635bff]/20 border border-[#635bff] text-dark xl:text-[16px] text-[14px] lg:h-[70px] h-[60px] rounded-[10px] transition duration-300 ease-linear hover:bg-[#635bff]/10 hover:border-[#635bff]/10 hover:text-[#635bff] dark:bg-[#635bff]/50 dark:text-white">
-                  <img class="mr-[15px] xl:w-[22px] w-[15px]" src="/assets/img/icon/facebook.svg" alt="google">
-                  Login with Facebook
-                </a>
-              </div>
-            </div>
-            <!-- google & facebook end -->
-            <div class="separator flex items-center justify-center my-[40px]">
-              <div class="bar flex-1 border-t border-dark/20 dark:border-white/20"></div>
-              <span class="text-dark text-[14px] text-center w-[30px] mx-[10px] dark:text-white">OR</span>
-              <div class="bar flex-1 border-t border-dark/20 dark:border-white/20"></div>
-            </div>
             <!-- inputs start -->
             <div class="input-wrap mb-[20px]">
               <input 

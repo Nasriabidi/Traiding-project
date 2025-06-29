@@ -69,7 +69,7 @@
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+          <img class="w-[40px] h-[40px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
           </div>
           <div class="name ml-[15px]">
             {{ userStore.user?.displayName || 'User' }}
@@ -91,7 +91,9 @@
             <ul>
               <li class="border-b border-[#DFE5F2]">
                 <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ userStore.user?.email || '' }}
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ userStore.user && userStore.user.email ? userStore.user?.email  : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
@@ -135,10 +137,26 @@
         <img class="inline-block h-[50px]" src="/assets/img/logo/logo-s.png" alt="logo">
       </router-link>
     </div>
-    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center mb-4">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ userStore.user?.displayName || 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ userStore.user?.email || '' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">
@@ -254,10 +272,10 @@
     <div class="inner-content">
       <div class="breadcrumb-wrap">
         <div class="breadcrumb-title">
-          <svg class="breadcrumb-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-                d="M3 16h5v-2H3v2zm6.5 0h5v-2h-5v2zm6.5 0h5v-2h-5v2zM3 20h2v-2H3v2zm4 0h2v-2H7v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zM3 12h8v-2H3v2zm10 0h8v-2h-8v2zM3 4v4h18V4H3z"></path>
-          </svg>
+            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                  d="M11 17h2v-1h1c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3v-1h4V8h-2V7h-2v1h-1c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3v1H9v2h2v1zm9-13H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V6h16v12z"></path>
+            </svg>
           USDT Recharge
         </div>
       </div>
@@ -281,12 +299,12 @@
                 </template>
                 <template v-else-if="step === 2">
                   <div class="text-center">
-                    <p class="mb-4">Recharge Wallet Address:</p>
+                    <p class="mb-4">Your Wallet Address:</p>
                     <div class="bg-gray-100 dark:bg-gray-800 p-2 rounded font-mono mb-4 select-all">
                       {{ refundWalletAddress }}
                     </div>
                     <button @click="verifyManually" :disabled="loading" class="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 transition mb-4">
-                      {{ loading ? 'Next...' : 'I have sent USDT' }}
+                      {{ loading ? 'Next...' : 'Next' }}
                     </button>
                     <p v-if="error" class="text-red-500 mt-2">{{ error }}</p>
                   </div>
@@ -303,7 +321,7 @@
                 <template v-else-if="step === 4">
                   <div class="text-center">
                     <p class="text-green-600 font-bold mb-2">Recharge processed successfully!</p>
-                    <button @click="resetForm" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition">Recharge Again</button>
+                    <button @click="resetForm" class="mt-4 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">Recharge Again</button>
                   </div>
                 </template>
                 <div class="mt-8">
@@ -452,20 +470,14 @@ const confirmRefund = async () => {
   error.value = '';
   loading.value = true;
   try {
-    // Store balances before and after
+    // Store balance before (do not update balance yet)
     const balanceBefore = balance.value;
-    const balanceAfter = balance.value + amount.value;
-    // Update user's balance in Firestore
-    const userDocRef = doc(db, 'users', userStore.user.uid);
-    await updateDoc(userDocRef, {
-      balance: balanceAfter
-    });
-    // Add recharge history entry with before/after balances
+    // Add recharge history entry with before balance, after will be set when approved
     const historyCol = collection(db, 'users', userStore.user.uid, 'rechargeHistory');
     await addDoc(historyCol, {
-      amount: amount.value,
+      amount: amount.value - (amount.value * 0.001), // Deduct 0.1% fee
       balanceBefore,
-      balanceAfter,
+      balanceAfter: null, 
       timestamp: new Date(),
       type: 'recharge',
       status: 'success',

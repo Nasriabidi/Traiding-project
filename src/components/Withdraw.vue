@@ -78,7 +78,11 @@ function handleLogout() {
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+            <img
+              class="w-[40px] h-[40px] rounded-full object-cover"
+              :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'"
+              alt="author"
+            >
           </div>
           <div class="name ml-[15px]">
             {{ userStore.user?.displayName || 'User' }}
@@ -100,7 +104,9 @@ function handleLogout() {
             <ul>
               <li class="border-b border-[#DFE5F2]">
                 <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ userStore.user?.email || '' }}
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ userStore.user && userStore.user.email ? userStore.user?.email  : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
@@ -143,10 +149,26 @@ function handleLogout() {
         <img class="inline-block h-[50px]" src="/assets/img/logo/logo-s.png" alt="logo">
       </router-link>
     </div>
-    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center mb-4">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ userStore.user?.displayName || 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ userStore.user?.email || '' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">

@@ -1,8 +1,36 @@
 <script setup>
+import { ref } from 'vue';
 import { useDark, useToggle } from '@vueuse/core';
+import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
+
+const email = ref('');
+const loading = ref(false);
+const error = ref('');
+const success = ref('');
+
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  error.value = '';
+  success.value = '';
+  if (!email.value) {
+    error.value = 'Please enter your email address.';
+    return;
+  }
+  loading.value = true;
+  try {
+    const auth = getAuth();
+    await sendPasswordResetEmail(auth, email.value);
+    success.value = 'A password reset link has been sent to your email.';
+    email.value = '';
+  } catch (err) {
+    error.value = err.message || 'Failed to send reset email.';
+  } finally {
+    loading.value = false;
+  }
+};
 </script>
 <template>
   <div class="w-full">
@@ -45,16 +73,28 @@ const toggleDark = useToggle(isDark);
           </div>
           <!-- login heading end -->
           <!-- login form start -->
-          <form action="#" class="login-form mt-[48px]">
+          <form @submit="handleSubmit" class="login-form mt-[48px]">
             <!-- inputs start -->
             <div class="input-wrap mb-[30px]">
-              <input type="text" placeholder="Email Address"
-                     class="w-full lg:h-[70px] h-[60px] px-[25px] bg-[#fff] text-dark border border-dark/20 rounded-[10px] outline-0 focus:border-[#0B9201]">
+              <input
+                v-model="email"
+                type="email"
+                placeholder="Email Address"
+                class="w-full lg:h-[70px] h-[60px] px-[25px] bg-[#fff] text-dark border border-dark/20 rounded-[10px] outline-0 focus:border-[#0B9201]"
+                autocomplete="email"
+                :disabled="loading"
+              >
             </div>
+            <div v-if="error" class="mb-2 text-red-600 text-center text-[15px]">{{ error }}</div>
+            <div v-if="success" class="mb-2 text-green-600 text-center text-[15px]">{{ success }}</div>
             <div class="input-btn mt-[40px] mb-[20px] text-center">
               <button
-                  class="inline-block lg:h-[70px] h-[60px] py-[5px] md:px-[50px] px-[30px] bg-[#0B9201] text-[#fff] xl:text-[24px] text-[18px] border border-[#0B9201] rounded-[10px] uppercase hover:border-[#0B9201]">
-                Send reset email
+                type="submit"
+                :disabled="loading"
+                class="inline-block lg:h-[70px] h-[60px] py-[5px] md:px-[50px] px-[30px] bg-[#0B9201] text-[#fff] xl:text-[24px] text-[18px] border border-[#0B9201] rounded-[10px] uppercase hover:border-[#0B9201] disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <span v-if="loading">Sending...</span>
+                <span v-else>Send reset email</span>
               </button>
             </div>
             <div class="forget-wrap mb-[40px] md:text-left text-center">

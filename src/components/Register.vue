@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDark, useToggle } from '@vueuse/core';
 import { auth, db } from '../firebase/config';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -20,6 +20,7 @@ const confirmPassword = ref('');
 const selectedCountry = ref('');
 const phoneNumber = ref('');
 const error = ref('');
+const success = ref('');
 const loading = ref(false);
 const profilePicture = ref(null);
 const profilePicturePreview = ref('');
@@ -110,6 +111,14 @@ const handleRegister = async (e) => {
       console.error('Register: updateProfile failed', profileErr);
       // Do not block registration, just log error and continue
     }
+    // Send email verification
+    try {
+      await sendEmailVerification(user);
+      // Optionally, you can show a message to the user here
+    } catch (verifyErr) {
+      console.error('Register: sendEmailVerification failed', verifyErr);
+      // Do not block registration, just log error and continue
+    }
     // Always attempt to create Firestore document
     const userData = {
       firstName: firstName.value,
@@ -133,7 +142,11 @@ const handleRegister = async (e) => {
       firestoreError = firestoreErr;
     }
     // Always navigate to login, but show error if Firestore failed
-    router.push('/login');
+    // Show a modern success message to check email for verification
+    success.value = 'Registration successful! Please check your email to verify your account before logging in.';
+    setTimeout(() => {
+      router.push('/login');
+    }, 5000);
   } catch (err) {
     console.error('Register: registration error', err);
     if (err && err.code) {
@@ -350,6 +363,12 @@ const countries = [
 ];
 </script>
 <template>
+  <transition name="fade">
+    <div v-if="success" class="fixed top-8 left-1/2 z-50 -translate-x-1/2 bg-[#0B9201] text-white px-6 py-4 rounded-[10px] shadow-lg text-lg flex items-center gap-2 animate-fade-in">
+      <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      {{ success }}
+    </div>
+  </transition>
   <button
       @click="toggleDark()"
       class="fixed right-[30px] top-[30px] z-[99] flex justify-center items-center w-[48px] h-[48px] rounded-full transition-all duration-300 ease-linear outline-0 cursor-pointer bg-dark dark:bg-white"
@@ -392,29 +411,6 @@ const countries = [
           <!-- login heading end -->
           <!-- login form start -->
           <form @submit="handleRegister" class="login-form mt-[48px]">
-            <!-- google & facebook start -->
-            <div class="flex xl:flex-nowrap lg:flex-wrap md:flex-nowrap flex-wrap items-center gap-[20px]">
-              <div class="xl:w-6/12 lg:w-full md:w-6/12 w-full">
-                <a href="#"
-                   class="flex justify-center items-center py-[5px] px-[15px] bg-[#0B9201]/20 border border-[#0B9201] text-dark xl:text-[16px] text-[14px] lg:h-[70px] h-[60px] rounded-[10px] transition duration-300 ease-linear hover:bg-[#0B9201]/10 hover:border-[#0B9201]/10 hover:text-[#0B9201] dark:bg-[#0B9201]/50 dark:text-white">
-                  <img class="mr-[15px] xl:w-[22px] w-[15px]" src="/assets/img/icon/google.svg" alt="google">
-                  Login with Google
-                </a>
-              </div>
-              <div class="xl:w-6/12 lg:w-full md:w-6/12 w-full">
-                <a href="#"
-                   class="flex justify-center items-center py-[5px] px-[15px] bg-[#635bff]/20 border border-[#635bff] text-dark xl:text-[16px] text-[14px] lg:h-[70px] h-[60px] rounded-[10px] transition duration-300 ease-linear hover:bg-[#635bff]/10 hover:border-[#635bff]/10 hover:text-[#635bff] dark:bg-[#635bff]/50 dark:text-white">
-                  <img class="mr-[15px] xl:w-[22px] w-[15px]" src="/assets/img/icon/facebook.svg" alt="google">
-                  Login with Facebook
-                </a>
-              </div>
-            </div>
-            <!-- google & facebook end -->
-            <div class="separator flex items-center justify-center my-[40px]">
-              <div class="bar flex-1 border-t border-dark/20 dark:border-white/20"></div>
-              <span class="text-dark text-[14px] text-center w-[30px] mx-[10px] dark:text-white">OR</span>
-              <div class="bar flex-1 border-t border-dark/20 dark:border-white/20"></div>
-            </div>
             <!-- inputs start -->
             <div
                 class="flex xl:flex-nowrap lg:flex-wrap md:flex-nowrap flex-wrap items-center xl:gap-[20px] lg:gap-0 md:gap-[20px]">
@@ -506,10 +502,30 @@ const countries = [
                   class="w-full lg:h-[70px] h-[60px] pl-[80px] pr-[25px] bg-[#fff] text-dark border border-dark/20 rounded-[10px] outline-0 focus:border-[#0B9201]">
               </div>
             </div>
-            <!-- Profile picture upload -->
+            <!-- Profile picture upload modern -->
             <div class="mb-4 flex flex-col items-center">
-              <img :src="profilePicturePreview || '/assets/img/author/author.jpeg'" class="w-20 h-20 rounded-full object-cover mb-2" />
-              <input type="file" accept="image/*" @change="handleProfilePictureChange" />
+              <div class="relative group">
+                <img :src="profilePicturePreview || '/assets/img/author/author.jpeg'" class="w-24 h-24 rounded-full object-cover border-4 border-[#0B9201]/30 shadow mb-2 transition-all duration-300" />
+                <button type="button"
+                  class="absolute bottom-2 right-2 bg-[#0B9201] text-white p-2 rounded-full shadow-lg hover:bg-[#087a01] transition"
+                  @click.prevent="() => $refs.profileInput.click()"
+                  title="Change photo">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6-6m2 2a2.828 2.828 0 11-4-4 2.828 2.828 0 014 4z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 7.5L19 10m-7 7h.01M12 19a7 7 0 100-14 7 7 0 000 14z" />
+                  </svg>
+                </button>
+                <button v-if="profilePicturePreview" type="button"
+                  class="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full shadow hover:bg-red-700 transition"
+                  @click.prevent="() => { profilePicture.value = null; profilePicturePreview.value = '' }"
+                  title="Remove photo">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                <input ref="profileInput" type="file" accept="image/*" @change="handleProfilePictureChange" class="hidden" />
+              </div>
+              <span class="text-xs text-gray-500 mt-1">JPG, PNG, or GIF. Max 5MB.</span>
             </div>
             <!-- Error message -->
             <div v-if="error" class="text-red-500 text-center mb-4 px-4 py-2 bg-red-100 rounded-lg">
@@ -530,7 +546,7 @@ const countries = [
                 <router-link to="/login" class="text-[#0B9201] hover:underline dark:text-primary">Login Now</router-link>
               </p>
               <p class="text-[18px] dark:text-white/70">
-                Copyright © admin 2022.
+                Copyright © admin 2025.
               </p>
             </div>
             <!-- inputs end -->
@@ -565,5 +581,18 @@ export default {
 </script>
 
 <style scoped>
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.4s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+.animate-fade-in {
+  animation: fadeIn 0.5s;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 </style>
