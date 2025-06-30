@@ -1,14 +1,149 @@
 <script setup>
+
+import { ref, watch, nextTick, onMounted } from 'vue';
 import { useDark, useToggle } from '@vueuse/core';
 import { storeToRefs } from 'pinia';
 import { useUserStore } from '../stores/userStore';
 import { useRouter } from 'vue-router';
-
-import { ref, watch, nextTick } from 'vue';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config'; // adjust the path as needed
 
+const router = useRouter();
+const userStore = useUserStore();
+const { user } = storeToRefs(userStore);
 
+// Dashboard stats
+const userBalance = ref(0);
+const userTotalProfit = ref(0);
+const firstRechargeAmount = ref(0);
+const accountGrowthPercent = ref(0);
+
+// Chart.js for Trading Growth Curve
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
+const chartRef = ref(null);
+let chartInstance = null;
+const sessionProfits = ref([]); // [{ opentime, profit }]
+
+// Fetch user stats and session profits when user changes
+watch(user, async (newUser) => {
+  if (newUser && newUser.uid) {
+    userBalance.value = typeof newUser.balance === 'number' ? newUser.balance : 0;
+    userTotalProfit.value = typeof newUser.totalprofit === 'number' ? newUser.totalprofit : 0;
+    // Fetch first recharge amount
+    try {
+      const historyCol = collection(db, 'users', newUser.uid, 'rechargeHistory');
+      const snap = await getDocs(historyCol);
+      const recharges = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(r => typeof r.amount === 'number' && r.amount > 0)
+        .sort((a, b) => {
+          // Sort by timestamp ascending (oldest first)
+          const aTime = a.timestamp?.seconds || 0;
+          const bTime = b.timestamp?.seconds || 0;
+          return aTime - bTime;
+        });
+      if (recharges.length > 0) {
+        firstRechargeAmount.value = recharges[0].amount;
+      } else {
+        firstRechargeAmount.value = 0;
+      }
+    } catch (e) {
+      firstRechargeAmount.value = 0;
+    }
+    // Calculate growth percent using the correct formula
+    if (firstRechargeAmount.value > 0) {
+      accountGrowthPercent.value = ((userBalance.value - firstRechargeAmount.value) / firstRechargeAmount.value) * 100;
+    } else {
+      accountGrowthPercent.value = 0;
+    }
+    // Fetch session profits for chart
+    await fetchSessionProfits(newUser.uid);
+    nextTick(() => {
+      renderGrowthChart();
+    });
+  } else {
+    userBalance.value = 0;
+    userTotalProfit.value = 0;
+    firstRechargeAmount.value = 0;
+    accountGrowthPercent.value = 0;
+    sessionProfits.value = [];
+    if (chartInstance) {
+      chartInstance.destroy();
+      chartInstance = null;
+    }
+  }
+}, { immediate: true });
+
+// Fetch session profits from Firestore
+async function fetchSessionProfits(uid) {
+  sessionProfits.value = [];
+  try {
+    const sessionsCol = collection(db, 'traidsession');
+    const q = query(sessionsCol, where('userId', '==', uid));
+    const snap = await getDocs(q);
+    const sessions = snap.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(s => typeof s.profit === 'number' && s.opentime && s.opentime.seconds)
+      .sort((a, b) => (a.opentime.seconds || 0) - (b.opentime.seconds || 0));
+    sessionProfits.value = sessions.map(s => ({
+      opentime: s.opentime.seconds * 1000, // ms
+      profit: s.profit
+    }));
+  } catch (e) {
+    sessionProfits.value = [];
+  }
+}
+
+function renderGrowthChart() {
+  if (!chartRef.value) return;
+  if (chartInstance) {
+    chartInstance.destroy();
+  }
+  const ctx = chartRef.value.getContext('2d');
+  const labels = sessionProfits.value.map(s => new Date(s.opentime).toLocaleDateString());
+  const data = sessionProfits.value.map(s => s.profit);
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Session Profit',
+        data,
+        borderColor: '#0b9201',
+        backgroundColor: 'rgba(11, 146, 1,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: '#0b9201',
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Session Open Date' }
+        },
+        y: {
+          title: { display: true, text: 'Profit' },
+          beginAtZero: true
+        }
+      }
+    }
+  });
+}
+
+onMounted(() => {
+  if (user.value && user.value.uid) {
+    fetchSessionProfits(user.value.uid).then(() => {
+      renderGrowthChart();
+    });
+  }
+});
 
 const isNotification = ref(false);
 const notifications = ref([]);
@@ -18,10 +153,6 @@ let lastNotifCount = 0;
 
 // Dynamically get the logged-in user ID from Pinia store
 const currentUserId = ref('');
-
-const router = useRouter();
-const userStore = useUserStore();
-const { user } = storeToRefs(userStore);
 
 
 watch(user, (newUser) => {
@@ -110,7 +241,7 @@ function handleLogout() {
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/billing" class="trading-btn group md:!flex !hidden">
+      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
         <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
         </svg>
@@ -278,7 +409,7 @@ function handleLogout() {
               <path
                   d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"></path>
             </svg>
-            <span class="text">Trading Overview</span>
+            <span class="text">Trading</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -354,18 +485,15 @@ function handleLogout() {
         </li>
       </ul>
     </div>
-    <div class="app-info" :class="isSidebar ? 'flex' : 'xl:hidden'">
-      <span>Available On</span>
-      <a href="#"><img src="/assets/img/icon/play-store.png" alt="icon"></a>
-      <a href="#"><img src="/assets/img/icon/apple-store.png" alt="icon"></a>
-    </div>
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
         </div>
-        <a href="#" class="app-btn">Get Funded Now</a>
+            <router-link to="/usdt-refund" >
+               <a href="#" class="app-btn">Get Funded Now</a>
+          </router-link>
       </div>
     </div>
     <div class="sidebar-shape-1"></div>
@@ -399,11 +527,28 @@ function handleLogout() {
                     </svg>
                   </div>
                   <div class="content">
-                    <h2>$8500.00</h2>
-                    <p>profit/loss</p>
+                    <h2>${{ userBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</h2>
+                    <p>Balance</p>
                   </div>
                   <div class="shape-bg">
                     <img class="w-full" src="/assets/img/shape/shape-green.png" alt="shape">
+                  </div>
+                </div>
+              </div>
+              <div class="xl:w-4/12 w-full px-[15px]">
+                <div class="dashboard-card">
+                  <div class="d-icon bg-primary">
+                    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                          d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"></path>
+                    </svg>
+                  </div>
+                  <div class="content">
+                    <h2>${{ userTotalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</h2>
+                    <p>Profit</p>
+                  </div>
+                  <div class="shape-bg">
+                    <img class="w-full" src="/assets/img/shape/shape-red.png" alt="shape">
                   </div>
                 </div>
               </div>
@@ -415,25 +560,8 @@ function handleLogout() {
                     </svg>
                   </div>
                   <div class="content">
-                    <h2>$0.00</h2>
-                    <p>drawdown</p>
-                  </div>
-                  <div class="shape-bg">
-                    <img class="w-full" src="/assets/img/shape/shape-red.png" alt="shape">
-                  </div>
-                </div>
-              </div>
-              <div class="xl:w-4/12 w-full px-[15px]">
-                <div class="dashboard-card">
-                  <div class="d-icon bg-primary">
-                    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                          d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"></path>
-                    </svg>
-                  </div>
-                  <div class="content">
-                    <h2>11 Days</h2>
-                    <p>trading days</p>
+                    <h2>{{ accountGrowthPercent > 0 ? accountGrowthPercent.toFixed(2) + '%' : '0.00%' }}</h2>
+                    <p>Total Account Growth</p>
                   </div>
                   <div class="shape-bg">
                     <img class="w-full" src="/assets/img/shape/shape-blue.png" alt="shape">
@@ -448,10 +576,7 @@ function handleLogout() {
                   <div class="content">
                     <div class="account-info">
                       <div class="account-info-top">
-                        <div class="info-item">
-                          <h4>User ID</h4>
-                          <p>{{ user && user.uid ? user.uid : 'N/A' }}</p>
-                        </div>
+                        <!-- User ID removed as requested -->
                         <div class="info-item">
                           <h4>Email</h4>
                           <p>{{ user && user.email ? user.email : 'N/A' }}</p>
@@ -466,20 +591,6 @@ function handleLogout() {
                           <span v-else>N/A</span>
                         </div>
                       </div>
-                      <div class="account-info-bottom mt-[40px]">
-                        <h4>Trading Cycle Details</h4>
-                        <div class="flex md:flex-nowrap flex-wrap items-center md:gap-[40px] gap-[20px]">
-                          <p><span class="text-[16px] font-bold">Start Date:</span> Sep 25, 2022</p>
-                          <p><span class="text-[16px] font-bold">End Date:</span> Oct 25, 2022</p>
-                          <a href="#" class="account-info-btn group">
-                            <svg class="icon w-[20px] h-[20px] fill-white mr-[5px] dark:group-hover:fill-dark" focusable="false"
-                                 viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"></path>
-                            </svg>
-                            Trading Details
-                          </a>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -490,6 +601,8 @@ function handleLogout() {
                 <div class="card-wrap">
                   <h3 class="card-title">Trading Growth Curve</h3>
                   <div class="content">
+                    <canvas ref="chartRef" height="120"></canvas>
+                    <div v-if="sessionProfits.length === 0" class="text-center text-gray-400 py-4">No session data to display.</div>
                   </div>
                 </div>
               </div>
@@ -511,7 +624,7 @@ function handleLogout() {
                     <path
                         d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"></path>
                   </svg>
-                  <span class="flex-1 break-all text-[14px] text-dark text-left">@d4t Prop Dashboard</span>
+                  <span class="flex-1 break-all text-[14px] text-dark text-left">Traid Dashboard</span>
                 </div>
               </div>
             </div>

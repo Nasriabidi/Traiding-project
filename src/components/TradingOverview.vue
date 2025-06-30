@@ -1,4 +1,53 @@
 <script setup>
+// PDF Download for Trading History (dynamic import for Vite compatibility)
+async function downloadHistoryPdf() {
+  try {
+    const jsPDFModule = await import('jspdf');
+    const autoTableModule = await import('jspdf-autotable');
+    const jsPDF = jsPDFModule.default;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Trading History', 14, 16);
+    const tableColumn = [
+      'SN', 'Open Time', 'Open Price', 'Close Time', 'Close Price', 'Profit', 'Commission', 'Symbol', 'Type'
+    ];
+    const tableRows = tradingHistory.value.map((item, idx) => [
+      idx + 1,
+      item.opentime && (item.opentime.seconds ? new Date(item.opentime.seconds * 1000).toLocaleString() : new Date(item.opentime).toLocaleString()),
+      item.openprice,
+      item.closetime && (item.closetime.seconds ? new Date(item.closetime.seconds * 1000).toLocaleString() : new Date(item.closetime).toLocaleString()),
+      item.closeprice || item.finalprice,
+      item.profit,
+      item.commission,
+      item.cryptopair,
+      item.type
+    ]);
+    // Use autoTable as a function, not as a prototype property
+    if (autoTableModule.default) {
+      autoTableModule.default(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 22,
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [11, 146, 1] }
+      });
+    } else if (typeof autoTableModule === 'function') {
+      autoTableModule(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 22,
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [52, 112, 255] }
+      });
+    } else {
+      throw new Error('Failed to load jsPDF autoTable');
+    }
+    doc.save('trading_history.pdf');
+  } catch (err) {
+    alert('Failed to generate PDF. See console for details.');
+    console.error('PDF generation error:', err);
+  }
+}
 // --- Trading Interface Additions ---
 import { addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -19,6 +68,8 @@ const sessionId = ref(null);
 const sessionData = ref(null);
 const finalPrice = ref(null);
 const sessionClosedMessage = ref(null);
+const allowEndSession = ref(false);
+const tradingDisabledMessage = ref('');
 
 // Try to restore session from localStorage
 
@@ -45,21 +96,29 @@ onMounted(() => {
 
 function getUserBalance() {
   // Try to get balance from userStore
-  return userStore.user?.balance || 10000; // fallback demo balance
+  return userStore.user?.balance ; // fallback demo balance
 }
 
+function getTotalProfit() {
+  // Try to get totalprofit from userStore
+  return userStore.user?.totalprofit || 0; // fallback demo balance
+}
 
 async function handleTrade(type) {
   // If session is active, only allow closing with the opposite button
   if (sessionId.value && sessionData.value && !sessionData.value.sessionend) {
-    // Only allow closing with the opposite type
-    if (type !== (sessionData.value.type === 'buy' ? 'sell' : 'buy')) return;
+    // Only allow closing with the opposite type and if allowendsession is true
+    if (
+      type !== (sessionData.value.type === 'buy' ? 'sell' : 'buy') ||
+      !sessionData.value.allowendsession
+    ) return;
     await handleCloseSession();
     return;
   }
   if (type === 'buy') buyDisabled.value = true;
   if (type === 'sell') sellDisabled.value = true;
-  const balance = getUserBalance();
+  // Always get the latest balance from userStore.user
+  const balance = userStore.user?.balance || 0;
   const leverage = selectedLeverage.value;
   const pair = selectedPair.value;
   // Calculate sessionbalance as a fraction of balance
@@ -82,6 +141,7 @@ async function handleTrade(type) {
     finalprice: 0,
     openprice: openPrice,
     leverage,
+    allowendsession: false,
   };
   // Create Firestore doc
   const docRef = await addDoc(collection(db, 'traidsession'), docData);
@@ -109,8 +169,7 @@ async function handleCloseSession() {
     opentime = opentime.seconds * 1000;
   }
   const periode = opentime ? closetime - opentime : 0;
-  // Commission fixed
-  const commission = 0.01;
+ 
   // Get final price
   let closePrice = currentPrice.value;
   if (!closePrice) {
@@ -118,9 +177,13 @@ async function handleCloseSession() {
   }
   // Use profit as already fetched from Firestore (sessionData.value.profit)
   const profit = sessionData.value.profit || 0;
+   // Commission fixed
+  const commission = profit * 0.01;
   // Update balance
   let balance = getUserBalance();
-  balance = balance + profit - (profit * commission);
+  balance = balance + (profit - commission);
+  let totalprofit = getTotalProfit();
+  totalprofit =  totalprofit + profit;
   // Update Firestore session
   await updateDoc(doc(db, 'traidsession', sessionId.value), {
     closetime: new Date(closetime),
@@ -132,14 +195,26 @@ async function handleCloseSession() {
     closeprice: closePrice
   });
 
-  // Update user balance in Firestore
+  // Update user balance in Firestore (increment, not replace)
   if (userStore.user && userStore.user.uid) {
     try {
-      await updateDoc(doc(db, 'users', userStore.user.uid), {
-        balance: balance
+      // Fetch latest balance from Firestore to avoid race conditions
+      const userDocRef = doc(db, 'users', userStore.user.uid);
+      const userSnap = await getDoc(userDocRef);
+      let latestBalance = 0;
+      let latestTotalProfit = 0;
+      if (userSnap.exists()) {
+        latestBalance = userSnap.data().balance || 0;
+        latestTotalProfit = userSnap.data().totalprofit || 0;
+      }
+      const newBalance = latestBalance + (profit - commission);
+      const newTotalProfit = latestTotalProfit + profit;
+      await updateDoc(userDocRef, {
+        balance: newBalance,
+        totalprofit: newTotalProfit
       });
       // Also update in Pinia store if needed
-      userStore.setUser({ ...userStore.user, balance });
+      userStore.setUser({ ...userStore.user, balance: newBalance, totalprofit: newTotalProfit });
     } catch (e) {
       // handle error if needed
     }
@@ -293,6 +368,54 @@ async function fetchNotifications() {
 
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
+
+watch(
+  () => userStore.user,
+  (newUser) => {
+    if (newUser && newUser.allowsession === false) {
+      buyDisabled.value = true;
+      sellDisabled.value = true;
+      tradingDisabledMessage.value =
+        'Trading is temporarily disabled: Our AI analysis has detected that current market conditions are too volatile or unfavorable for safe trading. Please check back later when the market stabilizes.';
+    } else {
+      buyDisabled.value = false;
+      sellDisabled.value = false;
+      tradingDisabledMessage.value = '';
+    }
+  },
+  { immediate: true }
+);
+// --- Trading History Section ---
+const tradingHistory = ref([]);
+const loadingHistory = ref(false);
+
+async function fetchTradingHistory() {
+  if (!userStore.user?.uid) return;
+  loadingHistory.value = true;
+  const q = query(
+    collection(db, 'traidsession'),
+    where('userId', '==', userStore.user.uid)
+  );
+  const querySnapshot = await getDocs(q);
+  tradingHistory.value = querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })).sort((a, b) => {
+    // Sort by opentime descending
+    const aTime = a.opentime?.seconds || 0;
+    const bTime = b.opentime?.seconds || 0;
+    return bTime - aTime;
+  });
+  loadingHistory.value = false;
+}
+
+onMounted(() => {
+  fetchTradingHistory();
+});
+
+watch(() => userStore.user?.uid, (uid) => {
+  if (uid) fetchTradingHistory();
+});
 </script>
 <template>
   <header class="header-area" :class="isSidebar ? 'header-area' : 'xl:!w-[calc(100%-73px)] xl:!ml-[73px]'">
@@ -302,6 +425,8 @@ const toggleDark = useToggle(isDark);
           <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"></path>
         </svg>
       </div>
+      <!-- Trading History Section (moved to bottom, styled like exemple.vue) -->
+
       <div class="logo text-center h-[80px] xl:!hidden !flex items-center justify-center">
         <router-link to="/">
           <img class="inline-block h-[50px] hidden dark:block" src="/assets/img/logo/logo-s.png" alt="logo">
@@ -310,7 +435,7 @@ const toggleDark = useToggle(isDark);
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/billing" class="trading-btn group md:!flex !hidden">
+      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
         <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
         </svg>
@@ -548,27 +673,21 @@ const toggleDark = useToggle(isDark);
         </li>
       </ul>
     </div>
-    <div class="app-info" :class="isSidebar ? 'flex' : 'xl:hidden'">
-      <span>Available On</span>
-      <a href="#"><img src="/assets/img/icon/play-store.png" alt="icon"></a>
-      <a href="#"><img src="/assets/img/icon/apple-store.png" alt="icon"></a>
-    </div>
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
         </div>
-        <a href="#" class="app-btn">Get Funded Now</a>
+          <router-link to="/usdt-refund" >
+               <a href="#" class="app-btn">Get Funded Now</a>
+          </router-link>
       </div>
     </div>
     <div class="sidebar-shape-1"></div>
     <div class="sidebar-shape-2"></div>
   </aside>
   <main class="content-wrapper" :class="isSidebar ? 'content-wrapper' : 'xl:!pl-[73px]'">
-    <div class="dashboard-info">
-      This is a sample dashboard, start trading for real data.
-    </div>
     <div class="inner-content">
       <div class="breadcrumb-wrap">
         <div class="breadcrumb-title">
@@ -581,6 +700,9 @@ const toggleDark = useToggle(isDark);
       </div>
       <div v-if="sessionClosedMessage" class="mb-4 p-4 rounded bg-green-100 text-green-800 font-semibold text-center border border-green-300">
         {{ sessionClosedMessage }}
+      </div>
+      <div v-if="tradingDisabledMessage" class="mb-4 p-4 rounded bg-yellow-100 text-yellow-800 font-semibold text-center border border-yellow-300">
+        {{ tradingDisabledMessage }}
       </div>
       <div class="dashboard-wrapper">
         <!-- CRYPTO TRADING INTERFACE -->
@@ -671,368 +793,56 @@ const toggleDark = useToggle(isDark);
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap mx-[-15px]">
-          <div class="xl:w-8/12 lg:w-7/12 w-full px-[15px]">
-          </div>
-          <div class="xl:w-4/12 lg:w-5/12 w-full px-[15px]">
-            <!--  Account Growth-->
-            <div class="flex flex-wrap mx-[-15px]">
-              <div class="w-full px-[15px]">
-                <div class="card-wrap">
-                  <div class="card-heading flex items-center justify-between mb-[20px]">
-                    <h3 class="card-title !mb-0">Account Growth</h3>
-                    <div class="icon">
-                      <svg class="w-[17px] h-[17px] dark:fill-white" focusable="false" viewBox="0 0 24 24" aria-hidden="true"
-                           title="Account Growth Percentage">
-                        <path
-                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"></path>
-                      </svg>
-                    </div>
-                  </div>
-                  <div class="content">
-                    <p class="text-dark text-[28px] text-center leading-[1.5] font-medium tracking-[-0.05px] py-[30px] dark:text-white">
-                      0%</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!--  Details Stats -->
-            <div class="card-wrap">
-              <h3 class="card-title">Details Stats</h3>
-              <div class="content text-center">
-                  <div class="stats-list flex flex-wrap items-center justify-between mb-[15px] border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]" src="/assets/img/icon/icon-equity.svg"
-                             alt="icon">
-                        Equity
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                      $58500.00
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px] border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]" src="/assets/img/icon/icon-balance.svg"
-                             alt="icon">
-                        Balance
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      $50000.00
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px]  border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-line-chart-up.svg"
-                             alt="icon">
-                        Avg. Winning Trade
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      $70.00
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px]  border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-line-chart-down.svg"
-                             alt="icon">
-                        Avg. Losing Trade
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      -$20.00
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px]  border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-line-chart-down.svg"
-                             alt="icon">
-                        Avg. Losing Trade
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      105
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px]  border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-grid.svg"
-                             alt="icon">
-                        Avg. Losing Trade
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      Lots
-                    </div>
-                  </div>
-                  <div
-                      class="stats-list flex flex-wrap items-center justify-between mb-[15px]  border-b border-dark/10 dark:border-white/10">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-vertical-align-center.svg"
-                             alt="icon">
-                        Average RRR
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px]" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      0
-                    </div>
-                  </div>
-                  <div class="stats-list flex flex-wrap items-center justify-between mb-[15px] ">
-                    <div class="text">
-                      <p class="inline-flex items-center text-dark text-[18px] leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <img class="inline-block w-[20px] h-[20px] mr-[5px]"
-                             src="/assets/img/icon/icon-merge-type.svg"
-                             alt="icon">
-                        Win Rate
-                        <svg class="inline-block w-[17px] h-[17px] fill-dark ml-[5px] dark:fill-white" focusable="false"
-                             viewBox="0 0 24 24" aria-hidden="true">
-                          <path
-                              d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"></path>
-                        </svg>
-                      </p>
-                    </div>
-                    <div class="numb text-dark text-[18px] leading-[1.5] tracking-[-0.05px] py-[15px] dark:text-white">
-                      65%
-                    </div>
-                  </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- trading history start-->
-        <div class="flex flex-wrap mx-[-15px]">
-          <div class="w-full px-[15px]">
-            <div class="card-wrap">
-              <div class="card-heading flex items-center justify-between mb-[20px]">
-                <h3 class="card-title !mb-0">Trading History</h3>
-                <a href="#" class="bg-primary text-white py-[10px] px-[15px] font-semibold rounded-[5px]">Download</a>
-              </div>
-              <div class="content">
-                <!-- trading-table start-->
-                <div class="trading-wrap overflow-x-auto">
-                  <div class="responsive-wrap min-w-[1200px]">
-                    <div
-                        class="heading grid grid-cols-[50px_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
-                      <p class=" text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                        SN
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                        Open Time
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                        Open Price
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                        Close Time
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">
-                        Close Price
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        lots
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Profit
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Commission
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Swap
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Symbol
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Type
-                      </p>
-                      <p class="inline-flex items-center text-dark text-[16px] leading-[1.5]  font-semibold tracking-[-0.05px] dark:text-white">
-                        Details
-                      </p>
-                    </div>
-                    <div
-                        class="content grid items-center grid-cols-[50px_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        1
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:01:47
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47199.83
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:10:02
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47254.29
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        1
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        $54.46
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        -$236.00
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        0
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        BTCUSD
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        Buy
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <a href="#"
-                           class="inline-block px-[10px] py-[5px] text-dark border border-dark rounded-[5px] transition-all duration-300 ease-linear hover:bg-primary hover:border-primary hover:text-white dark:bg-primary dark:text-white">View</a>
-                      </p>
-                    </div>
-                    <div
-                        class="content grid items-center grid-cols-[50px_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:01:47
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47199.83
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:10:02
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47254.29
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        1
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        $54.46
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        -$236.00
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        0
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        BTCUSD
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        Buy
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <a href="#"
-                           class="inline-block px-[10px] py-[5px] text-dark border border-dark rounded-[5px] transition-all duration-300 ease-linear hover:bg-primary hover:border-primary hover:text-white  dark:bg-primary dark:text-white">View</a>
-                      </p>
-                    </div>
-                    <div
-                        class="content grid items-center grid-cols-[50px_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        3
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:01:47
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47199.83
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        2022.01.01 08:10:02
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        47254.29
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        1
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        $54.46
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        -$236.00
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        0
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        BTCUSD
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        Buy
-                      </p>
-                      <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
-                        <a href="#"
-                           class="inline-block px-[10px] py-[5px] text-dark border border-dark rounded-[5px] transition-all duration-300 ease-linear hover:bg-primary hover:border-primary hover:text-white  dark:bg-primary  dark:text-white">View</a>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <!-- trading-table end-->
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- trading history end-->
       </div>
     </div>
+    <!-- trading history start-->
+    <div class="dashboard-wrapper mt-1">
+      <div class="card-wrap">
+        <div class="card-heading flex items-center justify-between mb-[20px]">
+          <h3 class="card-title !mb-0">Trading History</h3>
+          <button @click="downloadHistoryPdf" type="button" class="bg-primary text-white py-[10px] px-[15px] font-semibold rounded-[5px]">Download</button>
+        </div>
+        <div class="content">
+          <!-- trading-table start-->
+          <div class="trading-wrap overflow-x-auto">
+            <div class="responsive-wrap w-full min-w-0">
+              <div class="heading grid grid-cols-[50px_160px_120px_160px_120px_100px_100px_100px_80px_80px] gap-[10px] border-b border-[#000]/10 py-[10px]">
+                <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">SN</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Open Time</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Open Price</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Close Time</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Close Price</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Profit</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Commission</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Symbol</p>
+                <p class="inline-flex items-center text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Type</p>
+              </div>
+              <div v-if="loadingHistory" class="text-gray-500 py-4">Loading...</div>
+              <div v-else-if="tradingHistory.length === 0" class="text-gray-500 py-4">No trading history yet.</div>
+              <div v-else>
+                <div v-for="(item, idx) in tradingHistory" :key="item.id" class="content grid items-center grid-cols-[50px_160px_120px_160px_120px_100px_100px_100px_80px_80px_80px] gap-[10px] border-b border-[#000]/10 py-[10px]">
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ idx + 1 }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
+                    {{ item.opentime && (item.opentime.seconds ? new Date(item.opentime.seconds * 1000).toLocaleString() : new Date(item.opentime).toLocaleString()) }}
+                  </p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.openprice }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">
+                    {{ item.closetime && (item.closetime.seconds ? new Date(item.closetime.seconds * 1000).toLocaleString() : new Date(item.closetime).toLocaleString()) }}
+                  </p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.closeprice || item.finalprice }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.profit }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.commission }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.cryptopair }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.type }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- trading-table end-->
+        </div>
+      </div>
+    </div>
+    <!-- trading history end-->
   </main>
 </template>
 

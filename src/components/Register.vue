@@ -126,10 +126,11 @@ const handleRegister = async (e) => {
       email: email.value,
       phoneNumber: phoneNumber.value ? `${getDialCode()}${phoneNumber.value}` : '',
       country: selectedCountry.value,
-      photoURL: photoURL || '',
       photoBase64: photoBase64 || '',
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      allowsession: false,
+      totalprofit: 0
     };
     console.log('Register: attempting to create Firestore document', user.uid, userData);
     let firestoreError = null;

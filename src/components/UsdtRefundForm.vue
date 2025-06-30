@@ -15,7 +15,7 @@
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/billing" class="trading-btn group md:!flex !hidden">
+      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
         <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
         </svg>

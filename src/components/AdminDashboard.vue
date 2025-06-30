@@ -1,15 +1,31 @@
 <template>
   <div class="admin-dashboard min-h-screen flex flex-col md:flex-row">
+    <!-- Mobile Sidebar Toggle -->
+    <button
+      class="md:hidden fixed top-4 left-4 z-40 bg-primary text-white p-2 rounded focus:outline-none focus:ring"
+      @click="sidebarOpen = !sidebarOpen"
+      aria-label="Open sidebar"
+    >
+      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-menu"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <!-- Overlay for mobile sidebar -->
+    <div v-if="sidebarOpen" class="sidebar-overlay md:hidden" @click="sidebarOpen = false"></div>
     <!-- Sidebar -->
     <aside
-      class="w-full md:w-64 bg-gray-100 dark:bg-dark p-4 md:p-6 flex flex-row md:flex-col gap-4 md:gap-8 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700"
+      :class="[
+        'sidebar-drawer',
+        'bg-gray-100 dark:bg-dark border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700',
+        'p-4 md:p-6 flex flex-col gap-8 md:gap-8',
+        sidebarOpen ? 'sidebar-open' : '',
+      ]"
+      @click.self="sidebarOpen = false"
     >
       <div class="w-full">
         <h3 class="text-lg font-bold mb-2">Sections</h3>
-        <ul class="flex md:flex-col gap-4 md:gap-2 w-full">
+        <ul class="flex flex-col gap-4 md:gap-2 w-full">
           <li>
             <button
-              @click="activeSection = 'crypto'"
+              @click="activeSection = 'crypto'; sidebarOpen = false"
               :class="[ 'hover:underline font-semibold', activeSection === 'crypto' ? 'text-primary' : '' ]"
               style="background:none;border:none;padding:0;cursor:pointer"
             >
@@ -18,7 +34,7 @@
           </li>
           <li>
             <button
-              @click="activeSection = 'notification'"
+              @click="activeSection = 'notification'; sidebarOpen = false"
               :class="[ 'hover:underline font-semibold', activeSection === 'notification' ? 'text-primary' : '' ]"
               style="background:none;border:none;padding:0;cursor:pointer"
             >
@@ -27,11 +43,29 @@
           </li>
           <li>
             <button
-              @click="activeSection = 'rechargeControl'"
+              @click="activeSection = 'rechargeControl'; sidebarOpen = false"
               :class="[ 'hover:underline font-semibold', activeSection === 'rechargeControl' ? 'text-primary' : '' ]"
               style="background:none;border:none;padding:0;cursor:pointer"
             >
               Recharge Visibility Control
+            </button>
+          </li>
+          <li>
+            <button
+              @click="activeSection = 'sessionControl'; sidebarOpen = false"
+              :class="[ 'hover:underline font-semibold', activeSection === 'sessionControl' ? 'text-primary' : '' ]"
+              style="background:none;border:none;padding:0;cursor:pointer"
+            >
+              Session Control
+            </button>
+          </li>
+          <li>
+            <button
+              @click="activeSection = 'allowSessionControl'; sidebarOpen = false"
+              :class="[ 'hover:underline font-semibold', activeSection === 'allowSessionControl' ? 'text-primary' : '' ]"
+              style="background:none;border:none;padding:0;cursor:pointer"
+            >
+              Allow Trading Control
             </button>
           </li>
         </ul>
@@ -39,6 +73,136 @@
     </aside>
     <!-- Main Content -->
     <main class="flex-1 p-4 md:p-8">
+      <!-- Session Control Section -->
+      <section v-if="activeSection === 'sessionControl'" id="session-control" class="mb-8 md:mb-10">
+        <h2 class="text-2xl font-bold mb-6 md:mb-8">Session Control</h2>
+        <!-- Calculator for Final Price, only if user and session selected -->
+        <div v-if="selectedSessionUser && filteredLiveSessions.length > 0" class="mb-6 p-4 bg-gray-50 dark:bg-dark rounded border border-gray-200 dark:border-gray-700 max-w-xl">
+          <h3 class="font-semibold mb-2">Final Price Calculator</h3>
+          <div class="mb-2">
+            <label class="block text-sm font-semibold mb-1">Select Live Session:</label>
+            <select v-model="selectedCalcSessionId" class="border rounded px-2 py-1 w-full max-w-xs">
+              <option v-for="session in filteredLiveSessions" :key="session.id" :value="session.id">
+                {{ session.cryptopair }} | {{ session.type }} | Leverage: {{ session.leverage }}
+              </option>
+            </select>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-4 items-end">
+            <div>
+              <label class="block text-sm font-semibold mb-1">Current Price</label>
+              <input type="number" v-model.number="calcCurrentPrice" class="border rounded px-2 py-1 w-32" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold mb-1">Profit</label>
+              <input type="number" v-model.number="calcProfit" class="border rounded px-2 py-1 w-32" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold mb-1">Final Price</label>
+              <input type="number" :value="calcFinalPrice" class="border rounded px-2 py-1 w-32 bg-gray-100 dark:bg-gray-800" readonly />
+            </div>
+            <button @click="copyCalcFinalPrice" class="px-3 py-1 bg-primary text-white rounded" :disabled="!calcFinalPrice">Copy</button>
+          </div>
+          <div v-if="calcCopySuccess" class="text-green-600 mt-2 text-sm">Copied!</div>
+        </div>
+        <div class="mb-4">
+          <label class="block mb-1 font-semibold">Select User (by Email):</label>
+          <select v-model="selectedSessionUser" class="border rounded px-2 py-1 w-full max-w-xs">
+            <option v-for="user in users" :key="user.uid" :value="user.uid">
+              {{ user.email || user.displayName || user.uid }}
+            </option>
+          </select>
+        </div>
+        <div v-if="sessionLoading" class="text-gray-500 mb-2">Loading live sessions...</div>
+        <div v-else-if="!selectedSessionUser" class="text-gray-500 mb-2">Please select a user to view live sessions.</div>
+        <div v-else-if="filteredLiveSessions.length === 0" class="text-gray-500 mb-2">No live sessions found for this user.</div>
+        <div v-else class="overflow-x-auto">
+          <table class="min-w-full border text-sm">
+            <thead>
+              <tr class="bg-gray-100 dark:bg-dark">
+                <th class="border px-2 py-1">User</th>
+                <th class="border px-2 py-1">Crypto Pair</th>
+                <th class="border px-2 py-1">Type</th>
+                <th class="border px-2 py-1">Leverage</th>
+                <th class="border px-2 py-1">Current Price</th>
+                <th class="border px-2 py-1">Profit</th>
+                <th class="border px-2 py-1">Final Price</th>
+                <th class="border px-2 py-1">allowendsession</th>
+                <th class="border px-2 py-1">stop</th>
+                <th class="border px-2 py-1">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="session in filteredLiveSessions" :key="session.id">
+                <td class="border px-2 py-1">{{ getUserEmail(session.userId) }}</td>
+                <td class="border px-2 py-1">{{ session.cryptopair }}</td>
+                <td class="border px-2 py-1">{{ session.type }}</td>
+                <td class="border px-2 py-1">{{ session.leverage }}</td>
+                <td class="border px-2 py-1">{{ session.currentprice ?? 'Loading...' }}</td>
+                <td class="border px-2 py-1">
+                  <input type="number" v-model.number="session._editProfit" class="border rounded px-1 py-0.5 w-20" />
+                </td>
+                <td class="border px-2 py-1">
+                  <input type="number" v-model.number="session._editFinalPrice" class="border rounded px-1 py-0.5 w-20" />
+                </td>
+                <td class="border px-2 py-1">
+                  <button @click="updateSessionField(session, 'allowendsession', !session.allowendsession)" :disabled="sessionUpdatingId === session.id" class="px-2 py-1 rounded" :class="session.allowendsession ? 'bg-green-500 text-white' : 'bg-red-500 text-white'">
+                    {{ session.allowendsession ? 'True' : 'False' }}
+                  </button>
+                </td>
+                <td class="border px-2 py-1">
+                  <button @click="updateSessionField(session, 'stop', !session.stop)" :disabled="sessionUpdatingId === session.id" class="px-2 py-1 rounded" :class="session.stop ? 'bg-green-500 text-white' : 'bg-red-500 text-white'">
+                    {{ session.stop ? 'True' : 'False' }}
+                  </button>
+                </td>
+                <td class="border px-2 py-1">
+                  <button @click="saveSessionEdits(session)" :disabled="sessionUpdatingId === session.id" class="px-2 py-1 bg-primary text-white rounded disabled:opacity-50">Save</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="sessionError" class="text-red-500 mt-2">{{ sessionError }}</div>
+        <div v-if="sessionFeedback" class="text-green-600 mt-2">{{ sessionFeedback }}</div>
+      </section>
+      <section v-if="activeSection === 'allowSessionControl'" id="allow-session-control" class="mb-4">
+        <h2 class="text-2xl font-bold mb-6 md:mb-8">Allow Trading Control</h2>
+        <div class="mb-4">
+          <label class="block mb-1 font-semibold">Select User (by Email):</label>
+          <select v-model="selectedUserForAllowSession" class="border rounded px-2 py-1 w-full max-w-xs">
+            <option v-for="user in users" :key="user.uid" :value="user.uid">
+              {{ user.email || user.displayName || user.uid }}
+            </option>
+          </select>
+        </div>
+        <div v-if="selectedUserForAllowSession">
+          <div class="flex items-center gap-4 mb-2">
+            <span class="font-semibold">Allow Trading:</span>
+            <button
+              @click="setAllowSession(true)"
+              :disabled="getAllowSession(selectedUserForAllowSession) === true || allowSessionLoading"
+              class="px-2 py-1 bg-green-500 text-white rounded disabled:opacity-50"
+            >
+              True
+            </button>
+            <button
+              @click="setAllowSession(false)"
+              :disabled="getAllowSession(selectedUserForAllowSession) === false || allowSessionLoading"
+              class="px-2 py-1 bg-red-500 text-white rounded disabled:opacity-50"
+            >
+              False
+            </button>
+            <span v-if="allowSessionLoading" class="text-gray-500 ml-2">Updating...</span>
+          </div>
+          <div class="mt-1">
+            <span class="font-semibold">Current Value:</span>
+            <span :class="getAllowSession(selectedUserForAllowSession) ? 'text-green-600 font-bold' : 'text-red-600 font-bold'">
+              {{ getAllowSession(selectedUserForAllowSession) ? 'True' : 'False' }}
+            </span>
+          </div>
+        </div>
+        <div v-if="allowSessionError" class="text-red-500 mt-2">{{ allowSessionError }}</div>
+        <div v-if="allowSessionFeedback" class="text-green-600 mt-2">{{ allowSessionFeedback }}</div>
+      </section>
       <section v-if="activeSection === 'crypto'" id="crypto-prices" class="mb-8 md:mb-10">
         <h2 class="text-2xl font-bold mb-6 md:mb-8">Live Crypto Prices</h2>
         <h3 class="text-xl font-semibold mb-2">BTC/USDT & ETH/USDT</h3>
@@ -148,11 +312,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+
+const sidebarOpen = ref(false);
+
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '../firebase/config';
-import { collection, getDocs, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, doc, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
 
 const users = ref([]);
+const userMap = ref({});
 const selectedUser = ref('');
 const message = ref('');
 const loading = ref(false);
@@ -170,6 +338,136 @@ const rechargeHistory = ref([]);
 const rechargeLoading = ref(false);
 const rechargeError = ref('');
 const ethCopied = ref(false);
+const selectedUserForAllowSession = ref('');
+const allowSessionLoading = ref(false);
+const allowSessionError = ref('');
+const allowSessionFeedback = ref('');
+
+// Session Control State
+const liveSessions = ref([]);
+const sessionLoading = ref(false);
+const sessionError = ref('');
+const sessionFeedback = ref('');
+const sessionUpdatingId = ref('');
+const selectedSessionUser = ref('');
+
+// Calculator state for final price, auto-fills from selected session
+const selectedCalcSessionId = ref('');
+const calcCurrentPrice = ref(0);
+const calcProfit = ref(0);
+const calcCopySuccess = ref(false);
+const calcFinalPrice = computed(() => {
+  if (typeof calcCurrentPrice.value === 'number' && typeof calcProfit.value === 'number') {
+    return calcCurrentPrice.value + calcProfit.value;
+  }
+  return '';
+});
+
+// Define filteredLiveSessions before any watch that uses it
+const filteredLiveSessions = computed(() => {
+  if (!selectedSessionUser.value) return [];
+  return liveSessions.value.filter(s => s.userId === selectedSessionUser.value);
+});
+
+// Watch for session/user change to auto-fill calculator
+watch([selectedSessionUser, filteredLiveSessions], ([user, sessions]) => {
+  if (user && sessions.length > 0) {
+    selectedCalcSessionId.value = sessions[0].id;
+  } else {
+    selectedCalcSessionId.value = '';
+    calcCurrentPrice.value = 0;
+    calcProfit.value = 0;
+  }
+});
+
+watch(selectedCalcSessionId, (id) => {
+  const session = filteredLiveSessions.value.find(s => s.id === id);
+  if (session) {
+    calcCurrentPrice.value = typeof session.currentprice === 'number' ? session.currentprice : 0;
+    calcProfit.value = typeof session.profit === 'number' ? session.profit : 0;
+  }
+});
+
+function copyCalcFinalPrice() {
+  if (calcFinalPrice.value !== '' && !isNaN(calcFinalPrice.value)) {
+    navigator.clipboard.writeText(calcFinalPrice.value.toString());
+    calcCopySuccess.value = true;
+    setTimeout(() => (calcCopySuccess.value = false), 1200);
+  }
+}
+
+
+function getUserEmail(uid) {
+  const user = userMap.value[uid] || users.value.find(u => u.uid === uid);
+  return user ? (user.email || user.displayName || user.uid) : uid;
+}
+
+function updateSessionField(session, field, value) {
+  sessionUpdatingId.value = session.id;
+  sessionError.value = '';
+  sessionFeedback.value = '';
+  const sessionRef = doc(db, 'traidsession', session.id);
+  updateDoc(sessionRef, { [field]: value })
+    .then(() => {
+      session[field] = value;
+      sessionFeedback.value = 'Session updated!';
+    })
+    .catch(e => {
+      sessionError.value = 'Failed to update: ' + (e.message || e);
+    })
+    .finally(() => {
+      sessionUpdatingId.value = '';
+      setTimeout(() => (sessionFeedback.value = ''), 1200);
+    });
+}
+
+function saveSessionEdits(session) {
+  sessionUpdatingId.value = session.id;
+  sessionError.value = '';
+  sessionFeedback.value = '';
+  const sessionRef = doc(db, 'traidsession', session.id);
+  const updates = {};
+  if (typeof session._editProfit === 'number') updates.profit = session._editProfit;
+  if (typeof session._editFinalPrice === 'number') updates.finalprice = session._editFinalPrice;
+  updateDoc(sessionRef, updates)
+    .then(() => {
+      if (typeof session._editProfit === 'number') session.profit = session._editProfit;
+      if (typeof session._editFinalPrice === 'number') session.finalprice = session._editFinalPrice;
+      sessionFeedback.value = 'Session values saved!';
+    })
+    .catch(e => {
+      sessionError.value = 'Failed to save: ' + (e.message || e);
+    })
+    .finally(() => {
+      sessionUpdatingId.value = '';
+      setTimeout(() => (sessionFeedback.value = ''), 1200);
+    });
+}
+
+function getAllowSession(uid) {
+  const user = users.value.find(u => u.uid === uid);
+  return user ? user.allowsession === true : false;
+}
+
+async function setAllowSession(val) {
+  if (!selectedUserForAllowSession.value) return;
+  allowSessionLoading.value = true;
+  allowSessionError.value = '';
+  allowSessionFeedback.value = '';
+  try {
+    const userDocRef = doc(db, 'users', selectedUserForAllowSession.value);
+    await updateDoc(userDocRef, { allowsession: val });
+    // Update local users array
+    const idx = users.value.findIndex(u => u.uid === selectedUserForAllowSession.value);
+    if (idx !== -1) users.value[idx].allowsession = val;
+    allowSessionFeedback.value = 'Allow trading updated!';
+  } catch (e) {
+    allowSessionError.value = 'Failed to update: ' + (e.message || e);
+  } finally {
+    allowSessionLoading.value = false;
+    setTimeout(() => (allowSessionFeedback.value = ''), 1500);
+  }
+}
 
 function copyPrice(type) {
   let value = '';
@@ -190,8 +488,32 @@ onMounted(async () => {
   // Fetch all users (assumes user docs have displayName/email)
   const usersSnap = await getDocs(collection(db, 'users'));
   users.value = usersSnap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+  userMap.value = {};
+  users.value.forEach(u => { userMap.value[u.uid] = u; });
   await fetchPrices();
   priceInterval = setInterval(fetchPrices, 10000);
+
+  // Fetch live sessions (sessionend == false)
+  sessionLoading.value = true;
+  try {
+    const q = query(collection(db, 'traidsession'), where('sessionend', '==', false));
+    // Use onSnapshot for live updates
+    onSnapshot(q, (snap) => {
+      liveSessions.value = snap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          _editProfit: typeof data.profit === 'number' ? data.profit : 0,
+          _editFinalPrice: typeof data.finalprice === 'number' ? data.finalprice : 0,
+        };
+      });
+    });
+  } catch (e) {
+    sessionError.value = 'Failed to fetch live sessions.';
+  } finally {
+    sessionLoading.value = false;
+  }
 });
 
 const sendNotification = async () => {
@@ -257,39 +579,34 @@ watch(selectedUserForRecharge, async (uid) => {
   }
 });
 
+import { getDoc } from 'firebase/firestore';
 async function setRechargeVisible(item, visible) {
   if (!selectedUserForRecharge.value || !item.id) return;
   try {
     const docRef = doc(db, 'users', selectedUserForRecharge.value, 'rechargeHistory', item.id);
+    const userDocRef = doc(db, 'users', selectedUserForRecharge.value);
     if (visible && !item.visible) {
       // Only add to balance if approving (visible: true) and not already visible
-      // 1. Get user doc
-      const userDocRef = doc(db, 'users', selectedUserForRecharge.value);
-      const userSnap = await getDocs(collection(db, 'users'));
+      // 1. Get user doc directly
+      const userSnap = await getDoc(userDocRef);
       let userBalance = 0;
-      // Find the user doc
-      userSnap.forEach(u => {
-        if (u.id === selectedUserForRecharge.value) {
-          userBalance = u.data().balance || 0;
-        }
-      });
+      if (userSnap.exists()) {
+        userBalance = userSnap.data().balance || 0;
+      }
       const newBalance = userBalance + Number(item.amount);
       // 2. Update user balance
       await updateDoc(userDocRef, { balance: newBalance });
       // 3. Update rechargeHistory entry: visible and balanceAfter
-      await updateDoc(docRef, { visible: true, balanceAfter: newBalance,balanceBefore: userBalance   });
+      await updateDoc(docRef, { visible: true, balanceAfter: newBalance, balanceBefore: userBalance });
       item.visible = true;
       item.balanceAfter = newBalance;
     } else if (!visible && item.visible) {
       // If admin sets visible to false, subtract from balance
-      const userDocRef = doc(db, 'users', selectedUserForRecharge.value);
-      const userSnap = await getDocs(collection(db, 'users'));
+      const userSnap = await getDoc(userDocRef);
       let userBalance = 0;
-      userSnap.forEach(u => {
-        if (u.id === selectedUserForRecharge.value) {
-          userBalance = u.data().balance || 0;
-        }
-      });
+      if (userSnap.exists()) {
+        userBalance = userSnap.data().balance || 0;
+      }
       const newBalance = userBalance - Number(item.amount);
       await updateDoc(userDocRef, { balance: newBalance });
       await updateDoc(docRef, { visible: false, balanceAfter: null });
@@ -312,22 +629,57 @@ async function setRechargeVisible(item, visible) {
   max-width: 100vw;
   margin: 0;
 }
+
+/* Sidebar Drawer Styles */
+.sidebar-drawer {
+  width: 260px;
+  min-width: 220px;
+  max-width: 90vw;
+  transition: transform 0.3s cubic-bezier(.4,0,.2,1), box-shadow 0.3s;
+  z-index: 40;
+  background: rgba(0,0,0,0.45);
+  /* fallback for light mode */
+}
 @media (max-width: 767px) {
   .admin-dashboard {
     flex-direction: column;
   }
-  aside {
-    border-right: none !important;
-    border-bottom: 1px solid var(--tw-border-opacity, #e5e7eb);
-    flex-direction: row !important;
+  .sidebar-drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    background: #fff;
+    /* fallback for light mode */
+    /* For dark mode, override below */
+    box-shadow: 2px 0 8px rgba(0,0,0,0.08);
+    transform: translateX(-110%);
+    border-right: 1px solid var(--tw-border-opacity, #e5e7eb);
+    border-bottom: none !important;
+    flex-direction: column !important;
     gap: 1rem !important;
-    width: 100% !important;
-    padding: 1rem !important;
+    width: 80vw !important;
+    max-width: 320px;
+    padding: 1.5rem 1rem 1rem 1rem !important;
+    transition: transform 0.3s cubic-bezier(.4,0,.2,1), box-shadow 0.3s;
+    /* Dark mode override */
   }
-  aside ul {
-    flex-direction: row !important;
-    gap: 1rem !important;
-    width: 100%;
+  .dark .sidebar-drawer {
+    background: #18181b;
+  }
+  .sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.45);
+    z-index: 30;
+    transition: background 0.2s;
+  }
+  .sidebar-drawer.sidebar-open {
+    transform: translateX(0);
+    box-shadow: 2px 0 16px rgba(0,0,0,0.18);
   }
   main {
     padding: 1rem !important;
