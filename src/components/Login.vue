@@ -125,9 +125,7 @@ defineExpose({ router });
             <h1 class="text-dark xxl:text-5xl xl:text-4xl text-[24px] font-bold tracking[-0.24px] mb-[8px] dark:text-white">
               Exclusive Dashboard Tour
             </h1>
-            <p class="lg:w-10/12 md:w-9/12 text-[18px] leading-[27px] text-dark dark:text-white/70">Get access to exclusive tour of our platform
-              within 10 seconds, by simply submitting the following
-              information.</p>
+            <p class="lg:w-10/12 md:w-9/12 text-[18px] leading-[27px] text-dark dark:text-white/70">Log in to unlock your personalized crypto dashboard powered by <span class="text-[#0B9201] dark:text-primary">AI</span>. Get smart insights, real-time market analysis, and trading opportunities tailored just for you.</p>
           </div>
           <!-- login heading end -->
           <!-- login form start -->

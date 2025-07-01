@@ -23,6 +23,15 @@
       <div class="w-full">
         <h3 class="text-lg font-bold mb-2">Sections</h3>
         <ul class="flex flex-col gap-4 md:gap-2 w-full">
+        <li>
+          <button
+            @click="activeSection = 'allUsers'; sidebarOpen = false"
+            :class="[ 'hover:underline font-semibold', activeSection === 'allUsers' ? 'text-primary' : '' ]"
+            style="background:none;border:none;padding:0;cursor:pointer"
+          >
+            All Users
+          </button>
+        </li>
           <li>
             <button
               @click="activeSection = 'crypto'; sidebarOpen = false"
@@ -41,15 +50,24 @@
               Send Notification
             </button>
           </li>
-          <li>
-            <button
-              @click="activeSection = 'rechargeControl'; sidebarOpen = false"
-              :class="[ 'hover:underline font-semibold', activeSection === 'rechargeControl' ? 'text-primary' : '' ]"
-              style="background:none;border:none;padding:0;cursor:pointer"
-            >
-              Recharge Visibility Control
-            </button>
-          </li>
+      <li>
+        <button
+          @click="activeSection = 'rechargeControl'; sidebarOpen = false"
+          :class="[ 'hover:underline font-semibold', activeSection === 'rechargeControl' ? 'text-primary' : '' ]"
+          style="background:none;border:none;padding:0;cursor:pointer"
+        >
+          Recharge Visibility Control
+        </button>
+      </li>
+      <li>
+        <button
+          @click="activeSection = 'withdrawControl'; sidebarOpen = false"
+          :class="[ 'hover:underline font-semibold', activeSection === 'withdrawControl' ? 'text-primary' : '' ]"
+          style="background:none;border:none;padding:0;cursor:pointer"
+        >
+          Withdraw Request Control
+        </button>
+      </li>
           <li>
             <button
               @click="activeSection = 'sessionControl'; sidebarOpen = false"
@@ -72,7 +90,86 @@
       </div>
     </aside>
     <!-- Main Content -->
+    <section v-if="activeSection === 'allUsers'" id="all-users" class="mb-8 md:mb-10">
+      <h2 class="text-2xl font-bold mb-6 md:mb-8">All Users</h2>
+      <div v-if="users.length === 0" class="text-gray-500">No users found.</div>
+      <div v-else class="overflow-x-auto">
+        <table class="min-w-full border text-sm">
+          <thead>
+            <tr class="bg-gray-100 dark:bg-dark">
+              <th class="border px-2 py-1">#</th>
+              <th class="border px-2 py-1">First Name</th>
+              <th class="border px-2 py-1">Last Name</th>
+              <th class="border px-2 py-1">Email</th>
+              <th class="border px-2 py-1">Balance</th>
+              <th class="border px-2 py-1">Total Profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(user, idx) in users" :key="user.uid">
+              <td class="border px-2 py-1">{{ idx + 1 }}</td>
+              <td class="border px-2 py-1">{{ user.firstName || '' }}</td>
+              <td class="border px-2 py-1">{{ user.lastName || '' }}</td>
+              <td class="border px-2 py-1">{{ user.email || '' }}</td>
+              <td class="border px-2 py-1">{{ user.balance ?? 0 }}</td>
+              <td class="border px-2 py-1">{{ user.totalprofit ?? 0 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
     <main class="flex-1 p-4 md:p-8">
+      <!-- Withdraw Request Control Section (moved from sidebar) -->
+      <section v-if="activeSection === 'withdrawControl'" id="withdraw-control" class="mb-4">
+        <h2 class="text-2xl font-bold mb-6 md:mb-8">Withdraw Request Control</h2>
+        <div class="mb-4">
+          <label class="block mb-1 font-semibold">Select User (by Email):</label>
+          <select v-model="selectedUserForWithdraw" class="border rounded px-2 py-1 w-full max-w-xs">
+            <option v-for="user in users" :key="user.uid" :value="user.uid">
+              {{ user.email || user.displayName || user.uid }}
+            </option>
+          </select>
+        </div>
+        <div v-if="withdrawLoading" class="text-gray-500">Loading withdraw requests...</div>
+        <div v-else-if="withdrawHistory.length === 0" class="text-gray-500">No withdraw requests found for this user.</div>
+        <div v-else class="overflow-x-auto">
+          <table class="min-w-full border text-sm">
+            <thead>
+              <tr class="bg-gray-100 dark:bg-dark">
+                <th class="border px-2 py-1">#</th>
+                <th class="border px-2 py-1">Amount</th>
+                <th class="border px-2 py-1">Date</th>
+                <th class="border px-2 py-1">Payment Method</th>
+                <th class="border px-2 py-1">Wallet Address</th>
+                <th class="border px-2 py-1">Status</th>
+                <th class="border px-2 py-1">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, idx) in withdrawHistory" :key="item.id">
+                <td class="border px-2 py-1">{{ idx + 1 }}</td>
+                <td class="border px-2 py-1">${{ Number(item.amount).toFixed(2) }}</td>
+                <td class="border px-2 py-1">{{ item.createdAt && item.createdAt.seconds ? new Date(item.createdAt.seconds * 1000).toLocaleString() : '-' }}</td>
+                <td class="border px-2 py-1">{{ item.paymentMethod }}</td>
+                <td class="border px-2 py-1">{{ item.walletAddress }}</td>
+                <td class="border px-2 py-1">
+                  <span :class="{
+                    'text-yellow-500 font-bold': item.status === 'pending',
+                    'text-green-600 font-bold': item.status === 'approved',
+                    'text-red-500 font-bold': item.status === 'rejected'
+                  }">{{ item.status }}</span>
+                </td>
+                <td class="border px-2 py-1">
+                  <button @click="setWithdrawStatus(item, 'approved')" :disabled="item.status === 'approved'" class="px-2 py-1 bg-green-500 text-white rounded mr-1 disabled:opacity-50">Approve</button>
+                  <button @click="setWithdrawStatus(item, 'rejected')" :disabled="item.status === 'rejected'" class="px-2 py-1 bg-red-500 text-white rounded disabled:opacity-50">Reject</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="withdrawError" class="text-red-500 mt-2">{{ withdrawError }}</div>
+        <div v-if="withdrawFeedback" class="text-green-600 mt-2">{{ withdrawFeedback }}</div>
+      </section>
       <!-- Session Control Section -->
       <section v-if="activeSection === 'sessionControl'" id="session-control" class="mb-8 md:mb-10">
         <h2 class="text-2xl font-bold mb-6 md:mb-8">Session Control</h2>
@@ -119,10 +216,6 @@
           <table class="min-w-full border text-sm">
             <thead>
               <tr class="bg-gray-100 dark:bg-dark">
-                <th class="border px-2 py-1">User</th>
-                <th class="border px-2 py-1">Crypto Pair</th>
-                <th class="border px-2 py-1">Type</th>
-                <th class="border px-2 py-1">Leverage</th>
                 <th class="border px-2 py-1">Current Price</th>
                 <th class="border px-2 py-1">Profit</th>
                 <th class="border px-2 py-1">Final Price</th>
@@ -133,10 +226,6 @@
             </thead>
             <tbody>
               <tr v-for="session in filteredLiveSessions" :key="session.id">
-                <td class="border px-2 py-1">{{ getUserEmail(session.userId) }}</td>
-                <td class="border px-2 py-1">{{ session.cryptopair }}</td>
-                <td class="border px-2 py-1">{{ session.type }}</td>
-                <td class="border px-2 py-1">{{ session.leverage }}</td>
                 <td class="border px-2 py-1">{{ session.currentprice ?? 'Loading...' }}</td>
                 <td class="border px-2 py-1">
                   <input type="number" v-model.number="session._editProfit" class="border rounded px-1 py-0.5 w-20" />
@@ -318,6 +407,9 @@ const sidebarOpen = ref(false);
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '../firebase/config';
 import { collection, getDocs, addDoc, serverTimestamp, doc, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
+
+
+
 
 const users = ref([]);
 const userMap = ref({});
@@ -621,6 +713,75 @@ async function setRechargeVisible(item, visible) {
     rechargeError.value = 'Failed to update visibility.';
   }
 }
+
+// Withdraw Control State
+const selectedUserForWithdraw = ref('');
+const withdrawHistory = ref([]);
+const withdrawLoading = ref(false);
+const withdrawError = ref('');
+const withdrawFeedback = ref('');
+
+watch(selectedUserForWithdraw, async (uid) => {
+  withdrawHistory.value = [];
+  withdrawError.value = '';
+  if (!uid) return;
+  withdrawLoading.value = true;
+  try {
+    const q = query(collection(db, 'WithdrawRequest'), where('uid', '==', uid));
+    const querySnapshot = await getDocs(q);
+    withdrawHistory.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (e) {
+    withdrawError.value = 'Failed to fetch: ' + (e.message || e);
+  } finally {
+    withdrawLoading.value = false;
+  }
+});
+
+
+async function setWithdrawStatus(item, status) {
+  if (!item.id) return;
+  withdrawError.value = '';
+  withdrawFeedback.value = '';
+  try {
+    const docRef = doc(db, 'WithdrawRequest', item.id);
+    await updateDoc(docRef, { status });
+    item.status = status;
+    // Get user doc for both approved and rejected
+    if (status === 'approved' || status === 'rejected') {
+      const userDocRef = doc(db, 'users', item.uid);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const amount = Number(item.amount) || 0;
+        const userName = userData.displayName || userData.firstName || userData.email || item.uid;
+        if (status === 'approved') {
+          const oldBalance = userData.balance || 0;
+          const newBalance = oldBalance - amount;
+          await updateDoc(userDocRef, { balance: newBalance });
+          const notificationMsg = `✅ Withdrawal Approved\nHi ${userName}, your withdrawal request of $${amount.toFixed(2)} has been approved and is now being processed. You’ll receive the funds shortly.`;
+          await addDoc(collection(db, 'notifications'), {
+            userId: item.uid,
+            message: notificationMsg,
+            timestamp: serverTimestamp(),
+          });
+        } else if (status === 'rejected') {
+          const notificationMsg = `❌ Withdrawal Rejected\nHi ${userName}, your withdrawal request of $${amount.toFixed(2)} has been rejected. Please check your account details or contact support if you need assistance.`;
+          await addDoc(collection(db, 'notifications'), {
+            userId: item.uid,
+            message: notificationMsg,
+            timestamp: serverTimestamp(),
+          });
+        }
+      }
+    }
+    withdrawFeedback.value = 'Status updated!';
+  } catch (e) {
+    withdrawError.value = 'Failed to update: ' + (e.message || e);
+  } finally {
+    setTimeout(() => (withdrawFeedback.value = ''), 1500);
+  }
+}
+
 </script>
 
 

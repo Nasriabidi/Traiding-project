@@ -19,6 +19,7 @@ const password = ref('');
 const confirmPassword = ref('');
 const selectedCountry = ref('');
 const phoneNumber = ref('');
+
 const error = ref('');
 const success = ref('');
 const loading = ref(false);
@@ -26,9 +27,18 @@ const profilePicture = ref(null);
 const profilePicturePreview = ref('');
 const storage = getStorage();
 
+// Terms agreement
+const termsAccepted = ref(false);
+
 const validateForm = () => {
+
   if (!firstName.value || !lastName.value || !email.value || !password.value || !confirmPassword.value) {
     error.value = 'All fields are required';
+    return false;
+  }
+
+  if (!termsAccepted.value) {
+    error.value = 'You must agree to the Terms & Condition, Risk Disclosure & Privacy Policy.';
     return false;
   }
 
@@ -130,7 +140,8 @@ const handleRegister = async (e) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       allowsession: false,
-      totalprofit: 0
+      totalprofit: 0,
+      termsAccepted: !!termsAccepted.value
     };
     console.log('Register: attempting to create Firestore document', user.uid, userData);
     let firestoreError = null;
@@ -402,12 +413,9 @@ const countries = [
             </div>
             <!-- logo end -->
             <h1 class="text-dark xxl:text-5xl xl:text-4xl text-[24px] font-bold tracking[-0.24px] mb-[8px] dark:text-white">
-              Exclusive Dashboard
-              Tour</h1>
+              Create Your Account</h1>
             <p class="lg:w-10/12 md:w-9/12 text-[18px] leading-[27px] text-dark dark:text-white/70">Get access to exclusive tour of
-              our platform
-              within 10 seconds, by simply submitting the following
-              information.</p>
+             Join our crypto community today and unlock <span class="text-[#0B9201] dark:text-primary">AI</span>-powered market insights and real-time analysis. Make more informed decisions and stay ahead in the crypto world — it all starts here!</p>
           </div>
           <!-- login heading end -->
           <!-- login form start -->
@@ -529,6 +537,24 @@ const countries = [
               <span class="text-xs text-gray-500 mt-1">JPG, PNG, or GIF. Max 5MB.</span>
             </div>
             <!-- Error message -->
+
+            <!-- Terms & Policy Agreement -->
+            <div class="flex items-start mb-4">
+              <input
+                id="terms"
+                type="checkbox"
+                v-model="termsAccepted"
+                class="mt-1 mr-3 w-5 h-5 accent-[#0B9201] border border-gray-300 rounded focus:ring-2 focus:ring-[#0B9201]"
+                required
+              />
+              <label for="terms" class="text-[15px] text-dark dark:text-white/80 select-none">
+                I Declare That I Have Read And Agree With
+                <router-link to="/terms" class="text-[#0B9201] underline hover:text-[#087a01] dark:text-primary" target="_blank">
+                  Terms &amp; Condition, Risk Disclosure &amp; Privacy Policy
+                </router-link>
+              </label>
+            </div>
+
             <div v-if="error" class="text-red-500 text-center mb-4 px-4 py-2 bg-red-100 rounded-lg">
               {{ error }}
             </div>

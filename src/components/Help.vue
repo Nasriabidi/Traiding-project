@@ -1,10 +1,50 @@
 <script setup>
 import { useDark, useToggle } from '@vueuse/core';
 import { useUserStore } from '../stores/userStore';
+import { useRouter } from 'vue-router';
+import { ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
+
+const router = useRouter();
 
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
 const userStore = useUserStore();
+
+function handleLogout() {
+  localStorage.removeItem('user');
+  userStore.setUser(null);
+  router.push('/login');
+}
+
+const isNotification = ref(false);
+const notifications = ref([]);
+const currentUserId = ref('');
+const { user } = storeToRefs(userStore);
+
+watch(user, (newUser) => {
+  if (newUser && newUser.uid) {
+    currentUserId.value = newUser.uid;
+    fetchNotifications();
+  }
+}, { immediate: true });
+
+async function fetchNotifications() {
+  if (!currentUserId.value) return;
+  const notifRef = collection(db, 'notifications');
+  const q = query(notifRef, where('userId', '==', currentUserId.value));
+  const querySnapshot = await getDocs(q);
+  notifications.value = querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })).sort((a, b) => {
+    const aTime = a.timestamp?.seconds || 0;
+    const bTime = b.timestamp?.seconds || 0;
+    return aTime - bTime;
+  });
+}
 </script>
 <template>
   <header class="header-area" :class="isSidebar ? 'header-area' : 'xl:!w-[calc(100%-73px)] xl:!ml-[73px]'">
@@ -22,7 +62,7 @@ const userStore = useUserStore();
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/billing" class="trading-btn group md:!flex !hidden">
+      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
         <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
         </svg>
@@ -48,37 +88,47 @@ const userStore = useUserStore();
         </span>
       </button>
       <div class="h-notification group">
-        <div class="hn-icon group-hover:bg-dark" @click="isNotification = !isNotification">
-          <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-                d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"></path>
-          </svg>
+  <div class="hn-icon group-hover:bg-dark" @click="isNotification = !isNotification">
+    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"></path>
+    </svg>
+  </div>
+  <transition
+    enter-active-class="transition duration-300 ease-out"
+    enter-from-class="opacity-0 scale-75"
+    enter-to-class="opacity-100 scale-100"
+    leave-active-class="transition duration-300 ease-in"
+    leave-from-class="opacity-100 scale-100"
+    leave-to-class="opacity-0 scale-75">
+    <div class="notification-open" v-if="isNotification">
+      <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
+      <div class="content text-center notification-scroll">
+        <div v-if="notifications.length === 0">
+          <p>No Notification Here</p>
         </div>
-        <transition
-            enter-active-class="transition duration-300 ease-out"
-            enter-from-class="opacity-0 scale-75"
-            enter-to-class="opacity-100 scale-100"
-            leave-active-class="transition duration-300 ease-in"
-            leave-from-class="opacity-100 scale-100"
-            leave-to-class="opacity-0 scale-75">
-          <div class="notification-open" v-if="isNotification">
-            <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">
-              Notifications</h1>
-            <div class="content text-center">
-              <p>No Notification Here</p>
-            </div>
-          </div>
-        </transition>
+        <ul v-else>
+          <li v-for="notif in notifications" :key="notif.id" class="text-left mb-3">
+            <p class="font-semibold">{{ notif.message }}</p>
+            <p class="text-xs text-gray-500">{{ new Date(notif.timestamp?.seconds * 1000).toLocaleString() }}</p>
+          </li>
+        </ul>
       </div>
+    </div>
+  </transition>
+</div>
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
-            <img class="w-[40px] h-[40px] rounded-[5px]" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+            <img
+              class="w-[40px] h-[40px] rounded-full object-cover"
+              :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'"
+              alt="author"
+            >
           </div>
           <div class="name ml-[15px]">
             {{ userStore.user?.displayName || 'User' }}
-            <svg class="inline-block w-[24px] h-[24px] fill-dark dark:fill-white" focusable="false" viewBox="0 0 24 24"
-                 aria-hidden="true">
+            <svg class="inline-block w-[24px] h-[24px] fill-dark dark:fill-white" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M7 10l5 5 5-5z"></path>
             </svg>
           </div>
@@ -95,17 +145,15 @@ const userStore = useUserStore();
               v-if="isUserInfo">
             <ul>
               <li class="border-b border-[#DFE5F2]">
-                <a href="#"
-                   class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
-                  {{ userStore.user?.email || '' }}
+                <a href="#" class="block text-primary text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] dark:group-hover:!fill-primary">
+                  <span style="display:block; max-width:180px; overflow-wrap:break-word; word-break:break-all; white-space:normal;">
+                    {{ userStore.user && userStore.user.email ? userStore.user?.email  : 'No email' }}
+                  </span>
                 </a>
               </li>
               <li class="border-b border-[#DFE5F2] group">
-                <router-link to="/profile"
-                             class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary">
-                  <svg
-                      class="w-[22px] h-[22px] mr-[10px] fill-[#4A485F] transition-all duration-350 ease-linear group-hover:!fill-primary dark:fill-white dark:group-hover:!fill-primary"
-                      focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+                <router-link to="/profile" class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary">
+                  <svg class="w-[22px] h-[22px] mr-[10px] fill-[#4A485F] transition-all duration-350 ease-linear group-hover:!fill-primary dark:fill-white dark:group-hover:!fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
                     <path
                         d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
                   </svg>
@@ -113,15 +161,15 @@ const userStore = useUserStore();
                 </router-link>
               </li>
               <li class="group">
-                <router-link to="/login"
-                             class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary">
-                  <svg
-                      class="w-[22px] h-[22px] mr-[10px] fill-[#4A485F] transition-all duration-350 ease-linear group-hover:!fill-primary dark:fill-white dark:group-hover:!fill-primary"
-                      focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+                <button
+                  @click="handleLogout"
+                  class="flex items-center text-[#4A485F] text-[18px] leading-[1.5] tracking-[-0.05px] py-[10px] transition-all duration-350 ease-linear group-hover:text-primary dark:text-white dark:group-hover:text-primary w-full text-left"
+                >
+                  <svg class="w-[22px] h-[22px] mr-[10px] fill-[#4A485F] transition-all duration-350 ease-linear group-hover:!fill-primary dark:fill-white dark:group-hover:!fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M14 6v15H3v-2h2V3h9v1h5v15h2v2h-4V6h-3zm-4 5v2h2v-2h-2z"></path>
                   </svg>
                   Logout
-                </router-link>
+                </button>
               </li>
             </ul>
           </div>
@@ -134,7 +182,7 @@ const userStore = useUserStore();
       </div>
     </div>
   </header>
-  <div class="menu-overlay"
+    <div class="menu-overlay"
        :class="isMenubar ? 'fixed z-[99] left-0 top-0 w-full h-full bg-dark/80 cursor-pointer' : 'hidden'"
        @click="isMenubar = !isMenubar"></div>
   <aside class="sidebar" :class="[isSidebar ? 'sidebar' : 'sidebar-toggle xl:!w-[73px]', isMenubar ? '!left-0' : '']">
@@ -143,10 +191,26 @@ const userStore = useUserStore();
         <img class="inline-block h-[50px]" src="/assets/img/logo/logo-s.png" alt="logo">
       </router-link>
     </div>
-    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center">
-      <img class="w-[55px] h-[55px] rounded-full" :src="userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
+    <div class="lg:hidden flex flex-wrap flex-col items-center justify-center mb-4">
+      <img class="w-[55px] h-[55px] rounded-full object-cover" :src="userStore.user?.photoBase64 || userStore.user?.photoURL || '/assets/img/author/author.jpeg'" alt="author">
       <h4 class="text-white text-[15px] mt-[8px]">{{ userStore.user?.displayName || 'User' }}</h4>
       <p class="text-primary text-[12px] mt-[8px]">{{ userStore.user?.email || '' }}</p>
+      <router-link
+        to="/profile"
+        class="mt-3 px-4 py-2 bg-white text-primary rounded w-full text-center text-[15px] font-semibold border border-primary flex items-center justify-center"
+        style="margin-bottom: 8px;"
+      >
+        <svg class="w-[20px] h-[20px] mr-2 fill-primary" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"></path>
+        </svg>
+        My Profile
+      </router-link>
+      <button
+        @click="handleLogout"
+        class="px-4 py-2 bg-primary text-white rounded w-full text-center text-[15px] font-semibold"
+      >
+        Logout
+      </button>
     </div>
     <div class="main-menu">
       <ul class="nav">
@@ -164,16 +228,16 @@ const userStore = useUserStore();
               <path
                   d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"></path>
             </svg>
-            <span class="text">Trading Overview</span>
+            <span class="text">Trading</span>
           </router-link>
         </li>
         <li class="nav-item">
-          <router-link to="/utilities" class="nav-link group">
+          <router-link to="/usdt-refund" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M3 16h5v-2H3v2zm6.5 0h5v-2h-5v2zm6.5 0h5v-2h-5v2zM3 20h2v-2H3v2zm4 0h2v-2H7v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zM3 12h8v-2H3v2zm10 0h8v-2h-8v2zM3 4v4h18V4H3z"></path>
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" />
+              <text x="12" y="16" text-anchor="middle" font-size="10" fill="currentColor">USDT</text>
             </svg>
-            <span class="text">Utilities</span>
+            <span class="text">Recharge Account</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -186,33 +250,6 @@ const userStore = useUserStore();
           </router-link>
         </li>
         <li class="nav-item">
-          <router-link to="top-up-reset" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M11 17h2v-1h1c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3v-1h4V8h-2V7h-2v1h-1c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3v1H9v2h2v1zm9-13H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V6h16v12z"></path>
-            </svg>
-            <span class="text">Top-up & Reset</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/billing" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"></path>
-            </svg>
-            <span class="text">Billing</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/news-calendar" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"></path>
-            </svg>
-            <span class="text">News Calendar</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
           <router-link to="/help" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
               <path
@@ -221,32 +258,19 @@ const userStore = useUserStore();
             <span class="text">Help</span>
           </router-link>
         </li>
-        <li class="nav-item">
-          <router-link to="/courses" class="nav-link group">
-            <svg class="nav-icon" fill="none" stroke-width="1.5" stroke="currentColor" focusable="false"
-                 viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/>
-            </svg>
-            <span class="text">Courses</span>
-          </router-link>
-        </li>
       </ul>
     </div>
-    <div class="app-info" :class="isSidebar ? 'flex' : 'xl:hidden'">
-      <span>Available On</span>
-      <a href="#"><img src="/assets/img/icon/play-store.png" alt="icon"></a>
-      <a href="#"><img src="/assets/img/icon/apple-store.png" alt="icon"></a>
-    </div>
+   <router-link to="/usdt-refund" >
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
-        </div>
+        </div>  
         <a href="#" class="app-btn">Get Funded Now</a>
       </div>
     </div>
+    </router-link>
     <div class="sidebar-shape-1"></div>
     <div class="sidebar-shape-2"></div>
   </aside>
@@ -262,7 +286,7 @@ const userStore = useUserStore();
         </svg>
       </h2>
       <p class="text-white md:text-[24px] text-[16px] font-semibold leading-[1.5]">
-        Take a glance at the rules and what others asked about based on your current plan.
+        Take a glance at the rules and what other users have asked about.
       </p>
       <div class="absolute right-32 -bottom-0.5 hidden lg:block">
         <svg width="107" height="148" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -311,354 +335,129 @@ const userStore = useUserStore();
         </svg>
       </div>
     </div>
-    <div class="inner-content">
-      <div class="dashboard-wrapper">
-        <div class="flex flex-wrap mx-[-15px]">
-          <div class="w-full px-[15px]">
-            <div class="plan-tab-nav text-center">
-              <ul class="relative z-20 mx-auto mb-[40px] inline-flex items-center rounded-[100px] overflow-hidden shadow-[0_4px_10px_rgba(64,123,255,0.13)] dark:bg-dark">
-                <li class="inline-block">
-                  <button
-                      class="md:w-[120px] w-[100px] text-center md:text-[16px] text-[13px] md:px-[30px] px-[15px] py-[12px] rounded-[100px] dark:text-white"
-                      @click="toggleTabs(1)"
-                      :class="{'text-dark': openTab !== 1, 'text-white': openTab === 1}">
-                    FAQ
-                  </button>
-                </li>
-                <li class="inline-block">
-                  <button
-                      class="md:w-[120px] w-[100px] text-center md:text-[16px] text-[13px] md:px-[30px] px-[15px] py-[12px] rounded-[100px] dark:text-white"
-                      @click="toggleTabs(2)"
-                      :class="{'text-dark': openTab !== 2, 'text-white': openTab === 2}">
-                    Rules
-                  </button>
-                </li>
-                <li class="shape -z-10 absolute left-0 top-0 md:w-[120px] w-[100px] h-[100%] rounded-[100px] bg-primary transition-all duration-300 ease-linear"
-                    :class="{'md:translate-x-[120px] translate-x-[100px]': openTab !== 1, 'translate-x-[0]': openTab === 1}"></li>
-              </ul>
-            </div>
-            <div :class="{'hidden': openTab !== 1, 'block': openTab === 1}">
-              <!-- faq tab-->
-              <div
-                  class="faq-tab-wrap grid lg:grid-cols-[60%_40%] grid-cols-[1fr] bg-white lg:shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] h-[800px] dark:bg-dark dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                <!-- faq content-->
-                <div
-                    class="faq-content-wrap xl:px-[56px] lg:px-[30px] px-[20px] xl:py-[48px] lg:py-[30px] py-[20px] lg:border-r-[1px] border-[#EBEBEB] shadow-[0px_2.49067px_105.853px_rgba(217,225,255,0.59)] lg:shadow-none overflow-y-auto dark:bg-dark dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                  <div class="faq-content" :class="{'hidden': faqTab !== 1, 'block': faqTab === 1}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      YES! We operate 24/7, 7 days a week to answer all your questions!
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': faqTab !== 2, 'block': faqTab === 2}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      Trader is immediately eligible for maximum capital allocation of 600k!
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': faqTab !== 3, 'block': faqTab === 3}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      As payments we accept most form of cards such as debit and credit cards alongside crypto payments
-                      such as BTC and USDT. You can pay via any exchange and most credit card providers Visa,
-                      Mastercard! Here is a list of accepted credit card payments and cryptos.​ UNIONPAY, BTC (BITCOIN
-                      NETWORK), USDT (TRC20 NETW When you proceed in doing a crypto payment, please ensure you verify
-                      your network. If you send crypto over to us using the wrong network we are not held liable if we
-                      fail to receive your funds. In the event of incorrect network transfers, contact your crypto
-                      exchange, and in most cases you will get your funds back.
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': faqTab !== 4, 'block': faqTab === 4}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      Yes you can get unlimited free retries without paying if you ended your assessment program in
-                      positive and the rules have not been violated. For extensions, you are eligible for ONE 14-day
-                      extension if your account is in a 4% profit.
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': faqTab !== 5, 'block': faqTab === 5}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      Yes we provide each trader with live funds directly from our liquidity provider. However, your
-                      account is shown as demo even if the trader is funded. The trades taken are instantaneously
-                      mirrored onto a live account. We do so to prevent any substantial slippages or trading related
-                      losses. This gives the capital distributor protection when we provide traders with large sums of
-                      capital to work with.
-                    </p>
-                  </div>
-                </div>
-                <!-- faq nav-->
-                <div
-                    class="faq-nav-wrap bg-white xl:px-[56px] lg:px-[30px] py-[48px] overflow-y-scroll scrollbar-gray dark:bg-dark">
-                  <!-- general faq-->
-                  <div
-                      class="faq-toggle-wrap border-[#F2F2F2] border-[1px] shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] my-2 dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                    <div
-                        class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle"
-                        @click="faqCollapse(1)">
-                      <h4 class="text-dark text-[18px] font-semibold dark:text-white">General Questions</h4>
-                      <svg :class="{'rotate-0': openFaqCollapse !== 2, 'rotate-180': openFaqCollapse === 2}" width="11"
-                           height="7" viewBox="0 0 11 7" fill="none" xmlns="http://www.w3.org/2000/svg"
-                           class="fill-dark dark:fill-white">
-                        <path
-                            d="M5.00409 6.00409C4.87249 6.00485 4.74202 5.97963 4.62019 5.92986C4.49835 5.8801 4.38753 5.80677 4.29409 5.71409L0.294092 1.71409C0.200853 1.62085 0.126893 1.51016 0.0764322 1.38834C0.0259719 1.26652 1.96485e-09 1.13595 0 1.00409C-1.96485e-09 0.872232 0.0259719 0.741664 0.0764322 0.619842C0.126893 0.49802 0.200853 0.38733 0.294092 0.294091C0.38733 0.200853 0.498021 0.126892 0.619843 0.0764313C0.741665 0.0259709 0.872233 -1.96485e-09 1.00409 0C1.13595 1.96486e-09 1.26652 0.0259709 1.38834 0.0764313C1.51016 0.126892 1.62085 0.200853 1.71409 0.294091L5.00409 3.60409L8.30409 0.424091C8.39608 0.321802 8.50819 0.239593 8.6334 0.182607C8.75862 0.125621 8.89424 0.0950833 9.03179 0.0929041C9.16935 0.0907248 9.30587 0.11695 9.43283 0.169941C9.55978 0.222932 9.67444 0.301549 9.76962 0.400873C9.86481 0.500198 9.93848 0.618093 9.98602 0.747188C10.0336 0.876282 10.054 1.0138 10.0459 1.15113C10.0379 1.28847 10.0016 1.42267 9.93936 1.54535C9.8771 1.66802 9.7902 1.77653 9.68409 1.86409L5.68409 5.72409C5.50122 5.90041 5.25809 6.00052 5.00409 6.00409Z"></path>
-                      </svg>
-                    </div>
-                    <div class="faq-toggle-body py-[16px] px-[40px] dark:bg-toggle"
-                         :class="{'hidden': openFaqCollapse !== 1, 'block': openFaqCollapse === 1}">
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(1)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 1, 'text-primary before:bg-primary': faqTab === 1}">
-                        DOES UWM OPERATE 24/7?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(2)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 2, 'text-primary before:bg-primary': faqTab === 2}">
-                        WHAT IS THE MAXIMUM FUNDING A TRADER CAN GET?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(3)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 3, 'text-primary before:bg-primary': faqTab === 3}">
-                        HOW I CAN EDIT SMART OBJECTS ?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(4)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 4, 'text-primary before:bg-primary': faqTab === 4}">
-                        CAN I GET A RETRY WITHOUT PAYING? ARE THERE ANY EXTENSIONS IN PLACE?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(5)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 5, 'text-primary before:bg-primary': faqTab === 5}">
-                        DO I ACTUALLY TRADE ON A LIVE ACCOUNT?
-                      </button>
-                    </div>
-                  </div>
-                  <!-- evaluation faq-->
-                  <div
-                      class="faq-toggle-wrap border-[#F2F2F2] border-[1px] shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] my-2 dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)] dark:bg-toggle">
-                    <div
-                        class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle"
-                        @click="faqCollapse(2)">
-                      <h4 class="text-dark text-[18px] font-semibold dark:text-white">Evaluation Faq</h4>
-                      <svg :class="{'rotate-0': openFaqCollapse !== 2, 'rotate-180': openFaqCollapse === 2}" width="11"
-                           height="7" viewBox="0 0 11 7" fill="none" xmlns="http://www.w3.org/2000/svg"
-                           class="fill-dark dark:fill-white">
-                        <path
-                            d="M5.00409 6.00409C4.87249 6.00485 4.74202 5.97963 4.62019 5.92986C4.49835 5.8801 4.38753 5.80677 4.29409 5.71409L0.294092 1.71409C0.200853 1.62085 0.126893 1.51016 0.0764322 1.38834C0.0259719 1.26652 1.96485e-09 1.13595 0 1.00409C-1.96485e-09 0.872232 0.0259719 0.741664 0.0764322 0.619842C0.126893 0.49802 0.200853 0.38733 0.294092 0.294091C0.38733 0.200853 0.498021 0.126892 0.619843 0.0764313C0.741665 0.0259709 0.872233 -1.96485e-09 1.00409 0C1.13595 1.96486e-09 1.26652 0.0259709 1.38834 0.0764313C1.51016 0.126892 1.62085 0.200853 1.71409 0.294091L5.00409 3.60409L8.30409 0.424091C8.39608 0.321802 8.50819 0.239593 8.6334 0.182607C8.75862 0.125621 8.89424 0.0950833 9.03179 0.0929041C9.16935 0.0907248 9.30587 0.11695 9.43283 0.169941C9.55978 0.222932 9.67444 0.301549 9.76962 0.400873C9.86481 0.500198 9.93848 0.618093 9.98602 0.747188C10.0336 0.876282 10.054 1.0138 10.0459 1.15113C10.0379 1.28847 10.0016 1.42267 9.93936 1.54535C9.8771 1.66802 9.7902 1.77653 9.68409 1.86409L5.68409 5.72409C5.50122 5.90041 5.25809 6.00052 5.00409 6.00409Z"></path>
-                      </svg>
-                    </div>
-                    <div class="faq-toggle-body py-[16px] px-[40px]"
-                         :class="{'hidden': openFaqCollapse !== 2, 'block': openFaqCollapse === 2}">
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(1)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 1, 'text-primary before:bg-primary': faqTab === 1}">
-                        DOES UWM OPERATE 24/7?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(2)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 2, 'text-primary before:bg-primary': faqTab === 2}">
-                        WHAT IS THE MAXIMUM FUNDING A TRADER CAN GET?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(3)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 3, 'text-primary before:bg-primary': faqTab === 3}">
-                        HOW I CAN EDIT SMART OBJECTS ?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(4)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 4, 'text-primary before:bg-primary': faqTab === 4}">
-                        CAN I GET A RETRY WITHOUT PAYING? ARE THERE ANY EXTENSIONS IN PLACE?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(5)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 5, 'text-primary before:bg-primary': faqTab === 5}">
-                        DO I ACTUALLY TRADE ON A LIVE ACCOUNT?
-                      </button>
-                    </div>
-                  </div>
-                  <!-- express faq-->
-                  <div
-                      class="faq-toggle-wrap border-[#F2F2F2] border-[1px] shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] my-2 dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)] dark:bg-toggle">
-                    <div
-                        class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle"
-                        @click="faqCollapse(3)">
-                      <h4 class="text-dark text-[18px] font-semibold dark:text-white">Express Faq</h4>
-                      <svg :class="{'rotate-0': openFaqCollapse !== 3, 'rotate-180': openFaqCollapse === 3}" width="11"
-                           height="7" viewBox="0 0 11 7" fill="none" xmlns="http://www.w3.org/2000/svg"
-                           class="fill-dark dark:fill-white">
-                        <path
-                            d="M5.00409 6.00409C4.87249 6.00485 4.74202 5.97963 4.62019 5.92986C4.49835 5.8801 4.38753 5.80677 4.29409 5.71409L0.294092 1.71409C0.200853 1.62085 0.126893 1.51016 0.0764322 1.38834C0.0259719 1.26652 1.96485e-09 1.13595 0 1.00409C-1.96485e-09 0.872232 0.0259719 0.741664 0.0764322 0.619842C0.126893 0.49802 0.200853 0.38733 0.294092 0.294091C0.38733 0.200853 0.498021 0.126892 0.619843 0.0764313C0.741665 0.0259709 0.872233 -1.96485e-09 1.00409 0C1.13595 1.96486e-09 1.26652 0.0259709 1.38834 0.0764313C1.51016 0.126892 1.62085 0.200853 1.71409 0.294091L5.00409 3.60409L8.30409 0.424091C8.39608 0.321802 8.50819 0.239593 8.6334 0.182607C8.75862 0.125621 8.89424 0.0950833 9.03179 0.0929041C9.16935 0.0907248 9.30587 0.11695 9.43283 0.169941C9.55978 0.222932 9.67444 0.301549 9.76962 0.400873C9.86481 0.500198 9.93848 0.618093 9.98602 0.747188C10.0336 0.876282 10.054 1.0138 10.0459 1.15113C10.0379 1.28847 10.0016 1.42267 9.93936 1.54535C9.8771 1.66802 9.7902 1.77653 9.68409 1.86409L5.68409 5.72409C5.50122 5.90041 5.25809 6.00052 5.00409 6.00409Z"></path>
-                      </svg>
-                    </div>
-                    <div class="faq-toggle-body py-[16px] px-[40px]"
-                         :class="{'hidden': openFaqCollapse !== 3, 'block': openFaqCollapse === 3}">
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(1)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 1, 'text-primary before:bg-primary': faqTab === 1}">
-                        DOES UWM OPERATE 24/7?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(2)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 2, 'text-primary before:bg-primary': faqTab === 2}">
-                        WHAT IS THE MAXIMUM FUNDING A TRADER CAN GET?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(3)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 3, 'text-primary before:bg-primary': faqTab === 3}">
-                        HOW I CAN EDIT SMART OBJECTS ?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(4)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 4, 'text-primary before:bg-primary': faqTab === 4}">
-                        CAN I GET A RETRY WITHOUT PAYING? ARE THERE ANY EXTENSIONS IN PLACE?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="faqTabs(5)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': faqTab !== 5, 'text-primary before:bg-primary': faqTab === 5}">
-                        DO I ACTUALLY TRADE ON A LIVE ACCOUNT?
-                      </button>
-                    </div>
-                  </div>
-                </div>
+<div class="inner-content">
+  <div class="dashboard-wrapper">
+    <div class="flex flex-wrap mx-[-15px]">
+      <div class="w-full px-[15px]">
+
+        <!-- Tabs -->
+        <div class="plan-tab-nav text-center">
+          <ul class="relative z-20 mx-auto mb-[40px] inline-flex items-center rounded-[100px] overflow-hidden shadow-[0_4px_10px_rgba(64,123,255,0.13)] dark:bg-dark">
+            <li class="inline-block">
+              <button @click="toggleTabs(1)"
+                :class="{'text-dark': openTab !== 1, 'text-white': openTab === 1}"
+                class="md:w-[120px] w-[100px] text-center md:text-[16px] text-[13px] md:px-[30px] px-[15px] py-[12px] rounded-[100px] dark:text-white">
+                FAQ
+              </button>
+            </li>
+            <li class="inline-block">
+              <button @click="toggleTabs(2)"
+                :class="{'text-dark': openTab !== 2, 'text-white': openTab === 2}"
+                class="md:w-[120px] w-[100px] text-center md:text-[16px] text-[13px] md:px-[30px] px-[15px] py-[12px] rounded-[100px] dark:text-white">
+                Rules
+              </button>
+            </li>
+            <li class="shape -z-10 absolute left-0 top-0 md:w-[120px] w-[100px] h-[100%] rounded-[100px] bg-primary transition-all duration-300 ease-linear"
+              :class="{'md:translate-x-[120px] translate-x-[100px]': openTab !== 1, 'translate-x-[0]': openTab === 1}"></li>
+          </ul>
+        </div>
+
+        <!-- FAQ Content -->
+        <div :class="{'hidden': openTab !== 1, 'block': openTab === 1}">
+          <div class="faq-tab-wrap grid lg:grid-cols-[60%_40%] grid-cols-[1fr] bg-white lg:shadow min-h-[400px] max-h-[70vh] lg:max-h-[600px] dark:bg-dark">
+            <div class="faq-content-wrap xl:px-[56px] lg:px-[30px] px-[20px] xl:py-[48px] lg:py-[30px] py-[20px] lg:border-r border-[#EBEBEB] overflow-y-auto">
+              <div v-if="faqTab === 1">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Our platform provides AI-powered crypto market insights to help you make informed trading decisions.
+                </p>
+              </div>
+              <div v-else-if="faqTab === 2">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  No, we do not manage or trade your crypto. You always control your own funds and trades.
+                </p>
+              </div>
+              <div v-else-if="faqTab === 3">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Yes, your personal data is encrypted and securely stored. We never share your data without your consent.
+                </p>
+              </div>
+              <div v-else-if="faqTab === 4">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Our AI analysis updates 24/7 with real-time crypto market data.
+                </p>
+              </div>
+              <div v-else-if="faqTab === 5">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Yes! You can access your account and insights anytime on mobile, tablet, or desktop.
+                </p>
               </div>
             </div>
-            <div :class="{'hidden': openTab !== 2, 'block': openTab === 2}">
-              <!-- rules tab-->
-              <div
-                  class="faq-tab-wrap grid lg:grid-cols-[60%_40%] grid-cols-[1fr] bg-white lg:shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] h-[800px] dark:bg-dark dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                <!-- rules content-->
-                <div
-                    class="faq-content-wrap xl:px-[56px] lg:px-[30px] px-[20px] xl:py-[48px] lg:py-[30px] py-[20px] lg:border-r-[1px] border-[#EBEBEB] shadow-[0px_2.49067px_105.853px_rgba(217,225,255,0.59)] lg:shadow-none overflow-y-auto">
-                  <div class="faq-content" :class="{'hidden': rulesTab !== 1, 'block': rulesTab === 1}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      As payments we accept most form of cards such as debit and credit cards alongside crypto payments
-                      such as BTC and USDT. You can pay via any exchange and most credit card providers Visa,
-                      Mastercard! Here is a list of accepted credit card payments and cryptos.​ UNIONPAY, BTC (BITCOIN
-                      NETWORK), USDT (TRC20 NETW When you proceed in doing a crypto payment, please ensure you verify
-                      your network. If you send crypto over to us using the wrong network we are not held liable if we
-                      fail to receive your funds. In the event of incorrect network transfers, contact your crypto
-                      exchange, and in most cases you will get your funds back.
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': rulesTab !== 2, 'block': rulesTab === 2}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      Ensure that you have read and understood the rules for the program before placing your first
-                      trade. Once you go through them, you may log on to your trading account using the credentials you
-                      were given via email.
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': rulesTab !== 3, 'block': rulesTab === 3}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      As payments we accept most form of cards such as debit and credit cards alongside crypto payments
-                      such as BTC and USDT. You can pay via any exchange and most credit card providers Visa,
-                      Mastercard! Here is a list of accepted credit card payments and cryptos.​ UNIONPAY, BTC (BITCOIN
-                      NETWORK), USDT (TRC20 NETW When you proceed in doing a crypto payment, please ensure you verify
-                      your network. If you send crypto over to us using the wrong network we are not held liable if we
-                      fail to receive your funds. In the event of incorrect network transfers, contact your crypto
-                      exchange, and in most cases you will get your funds back.
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': rulesTab !== 4, 'block': rulesTab === 4}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
-                      As payments we accept most form of cards such as debit and credit cards alongside crypto payments
-                      such as BTC and USDT. You can pay via any exchange and most credit card providers Visa,
-                      Mastercard! Here is a list of accepted credit card payments and cryptos.​ UNIONPAY, BTC (BITCOIN
-                    </p>
-                  </div>
-                  <div class="faq-content" :class="{'hidden': rulesTab !== 5, 'block': rulesTab === 5}">
-                    <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
 
-                      We are not a broker. EightCap is our trading server. It is provided by an institutional fintech
-                      company who provides us liquidity. We do not require regulation as we are a proprietary firm. It
-                      is our company money that is being used in all of our accounts.
-                    </p>
-                  </div>
+            <!-- FAQ Nav -->
+            <div class="faq-nav-wrap bg-white xl:px-[56px] lg:px-[30px] py-[48px] overflow-y-scroll scrollbar-gray dark:bg-dark">
+              <div class="faq-toggle-wrap border border-[#F2F2F2] shadow my-2 dark:bg-toggle">
+                <div class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle">
+                  <h4 class="text-dark text-[18px] font-semibold dark:text-white">General Questions</h4>
                 </div>
-                <!-- rules nav-->
-                <div
-                    class="faq-nav-wrap bg-white xl:px-[56px] lg:px-[30px] py-[48px] overflow-y-scroll scrollbar-gray dark:bg-dark">
-                  <!-- express rules-->
-                  <div
-                      class="faq-toggle-wrap border-[#F2F2F2] border-[1px] shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] my-2 dark:bg-toggle dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                    <div class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer"
-                         @click="rulesCollapse(1)">
-                      <h4 class="text-dark text-[18px] font-semibold dark:text-white">Express Rule</h4>
-                      <svg :class="{'rotate-0': openRulesCollapse !== 1, 'rotate-180': openRulesCollapse === 1}"
-                           width="11" height="7" viewBox="0 0 11 7" fill="none" xmlns="http://www.w3.org/2000/svg"
-                           class="fill-dark dark:fill-white">
-                        <path
-                            d="M5.00409 6.00409C4.87249 6.00485 4.74202 5.97963 4.62019 5.92986C4.49835 5.8801 4.38753 5.80677 4.29409 5.71409L0.294092 1.71409C0.200853 1.62085 0.126893 1.51016 0.0764322 1.38834C0.0259719 1.26652 1.96485e-09 1.13595 0 1.00409C-1.96485e-09 0.872232 0.0259719 0.741664 0.0764322 0.619842C0.126893 0.49802 0.200853 0.38733 0.294092 0.294091C0.38733 0.200853 0.498021 0.126892 0.619843 0.0764313C0.741665 0.0259709 0.872233 -1.96485e-09 1.00409 0C1.13595 1.96486e-09 1.26652 0.0259709 1.38834 0.0764313C1.51016 0.126892 1.62085 0.200853 1.71409 0.294091L5.00409 3.60409L8.30409 0.424091C8.39608 0.321802 8.50819 0.239593 8.6334 0.182607C8.75862 0.125621 8.89424 0.0950833 9.03179 0.0929041C9.16935 0.0907248 9.30587 0.11695 9.43283 0.169941C9.55978 0.222932 9.67444 0.301549 9.76962 0.400873C9.86481 0.500198 9.93848 0.618093 9.98602 0.747188C10.0336 0.876282 10.054 1.0138 10.0459 1.15113C10.0379 1.28847 10.0016 1.42267 9.93936 1.54535C9.8771 1.66802 9.7902 1.77653 9.68409 1.86409L5.68409 5.72409C5.50122 5.90041 5.25809 6.00052 5.00409 6.00409Z"></path>
-                      </svg>
-                    </div>
-                    <div class="faq-toggle-body py-[16px] px-[40px]"
-                         :class="{'hidden': openRulesCollapse !== 1, 'block': openRulesCollapse === 1}">
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="rulesTabs(1)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': rulesTab !== 1, 'text-primary before:bg-primary': rulesTab === 1}">
-                        DOES UWM OPERATE 24/7?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="rulesTabs(2)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': rulesTab !== 2, 'text-primary before:bg-primary': rulesTab === 2}">
-                        WHAT IS THE MAXIMUM FUNDING A TRADER CAN GET?
-                      </button>
-                    </div>
-                  </div>
-                  <!-- evaluation rules-->
-                  <div
-                      class="faq-toggle-wrap border-[#F2F2F2] border-[1px] shadow-[0px_2.13333px_90.6667px_rgba(217,225,255,0.59)] my-2 dark:bg-toggle dark:shadow-[0px_2.13333px_10.6667px_rgba(217,225,255,0.59)]">
-                    <div
-                        class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle"
-                        @click="rulesCollapse(2)">
-                      <h4 class="text-dark text-[18px] font-semibold dark:text-white">Evaluation Rule</h4>
-                      <svg :class="{'rotate-0': openRulesCollapse !== 2, 'rotate-180': openRulesCollapse === 2}"
-                           width="11" height="7" viewBox="0 0 11 7" fill="none" xmlns="http://www.w3.org/2000/svg"
-                           class="fill-dark dark:fill-white">
-                        <path
-                            d="M5.00409 6.00409C4.87249 6.00485 4.74202 5.97963 4.62019 5.92986C4.49835 5.8801 4.38753 5.80677 4.29409 5.71409L0.294092 1.71409C0.200853 1.62085 0.126893 1.51016 0.0764322 1.38834C0.0259719 1.26652 1.96485e-09 1.13595 0 1.00409C-1.96485e-09 0.872232 0.0259719 0.741664 0.0764322 0.619842C0.126893 0.49802 0.200853 0.38733 0.294092 0.294091C0.38733 0.200853 0.498021 0.126892 0.619843 0.0764313C0.741665 0.0259709 0.872233 -1.96485e-09 1.00409 0C1.13595 1.96486e-09 1.26652 0.0259709 1.38834 0.0764313C1.51016 0.126892 1.62085 0.200853 1.71409 0.294091L5.00409 3.60409L8.30409 0.424091C8.39608 0.321802 8.50819 0.239593 8.6334 0.182607C8.75862 0.125621 8.89424 0.0950833 9.03179 0.0929041C9.16935 0.0907248 9.30587 0.11695 9.43283 0.169941C9.55978 0.222932 9.67444 0.301549 9.76962 0.400873C9.86481 0.500198 9.93848 0.618093 9.98602 0.747188C10.0336 0.876282 10.054 1.0138 10.0459 1.15113C10.0379 1.28847 10.0016 1.42267 9.93936 1.54535C9.8771 1.66802 9.7902 1.77653 9.68409 1.86409L5.68409 5.72409C5.50122 5.90041 5.25809 6.00052 5.00409 6.00409Z"></path>
-                      </svg>
-                    </div>
-                    <div class="faq-toggle-body py-[16px] px-[40px]"
-                         :class="{'hidden': openRulesCollapse !== 2, 'block': openFaqCollapse === 2}">
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="rulesTabs(3)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': rulesTab !== 3, 'text-primary before:bg-primary': rulesTab === 3}">
-                        HOW I CAN EDIT SMART OBJECTS ?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="rulesTabs(4)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': rulesTab !== 4, 'text-primary before:bg-primary': rulesTab === 4}">
-                        CAN I GET A RETRY WITHOUT PAYING? ARE THERE ANY EXTENSIONS IN PLACE?
-                      </button>
-                      <button
-                          class="w-full text-left mb-[16px] relative pl-[25px] lg:text-[18px] text-[16px] before:content-[''] before:w-[10px] before:h-[10px] before:rounded-full before:absolute before:left-0 before:top-[8px]"
-                          @click="rulesTabs(5)"
-                          :class="{'text-dark before:bg-dark dark:text-white dark:before:bg-white': rulesTab !== 5, 'text-primary before:bg-primary': rulesTab === 5}">
-                        DO I ACTUALLY TRADE ON A LIVE ACCOUNT?
-                      </button>
-                    </div>
-                  </div>
+                <div class="faq-toggle-body py-[16px] px-[40px] dark:bg-toggle">
+                  <button @click="faqTabs(1)" :class="{'text-primary': faqTab === 1}" class="w-full text-left mb-[16px] relative pl-[25px]">What does this platform do?</button>
+                  <button @click="faqTabs(2)" :class="{'text-primary': faqTab === 2}" class="w-full text-left mb-[16px] relative pl-[25px]">Does the platform trade for me?</button>
+                  <button @click="faqTabs(3)" :class="{'text-primary': faqTab === 3}" class="w-full text-left mb-[16px] relative pl-[25px]">Is my personal data safe?</button>
+                  <button @click="faqTabs(4)" :class="{'text-primary': faqTab === 4}" class="w-full text-left mb-[16px] relative pl-[25px]">How often is data updated?</button>
+                  <button @click="faqTabs(5)" :class="{'text-primary': faqTab === 5}" class="w-full text-left mb-[16px] relative pl-[25px]">Can I use it on mobile?</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- Rules Content -->
+        <div :class="{'hidden': openTab !== 2, 'block': openTab === 2}">
+          <div class="faq-tab-wrap grid lg:grid-cols-[60%_40%] grid-cols-[1fr] bg-white lg:shadow min-h-[400px] max-h-[70vh] lg:max-h-[600px] dark:bg-dark">
+            <div class="faq-content-wrap xl:px-[56px] lg:px-[30px] px-[20px] xl:py-[48px] lg:py-[30px] py-[20px] lg:border-r border-[#EBEBEB] overflow-y-auto">
+              <div v-if="rulesTab === 1">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Users must be 18 years or older to create an account.
+                </p>
+              </div>
+              <div v-else-if="rulesTab === 2">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  All market analysis is for information only — we do not provide financial advice.
+                </p>
+              </div>
+              <div v-else-if="rulesTab === 3">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  Any profit or loss resulting from your trading is your full responsibility.
+                </p>
+              </div>
+              <div v-else-if="rulesTab === 4">
+                <p class="text-dark lg:text-[18px] text-[16px] mb-[10px] dark:text-white/70">
+                  All withdrawal requests are reviewed before being approved and delivered.
+                </p>
+              </div>
+            </div>
+
+            <!-- Rules Nav -->
+            <div class="faq-nav-wrap bg-white xl:px-[56px] lg:px-[30px] py-[48px] overflow-y-scroll scrollbar-gray dark:bg-dark">
+              <div class="faq-toggle-wrap border border-[#F2F2F2] shadow my-2 dark:bg-toggle">
+                <div class="faq-toggle-head flex items-center justify-between py-[16px] px-[32px] cursor-pointer dark:bg-toggle">
+                  <h4 class="text-dark text-[18px] font-semibold dark:text-white">Platform Rules</h4>
+                </div>
+                <div class="faq-toggle-body py-[16px] px-[40px] dark:bg-toggle">
+                  <button @click="rulesTabs(1)" :class="{'text-primary': rulesTab === 1}" class="w-full text-left mb-[16px] relative pl-[25px]">Age Requirement</button>
+                  <button @click="rulesTabs(2)" :class="{'text-primary': rulesTab === 2}" class="w-full text-left mb-[16px] relative pl-[25px]">No Financial Advice</button>
+                  <button @click="rulesTabs(3)" :class="{'text-primary': rulesTab === 3}" class="w-full text-left mb-[16px] relative pl-[25px]">Profit & Loss Disclaimer</button>
+                  <button @click="rulesTabs(4)" :class="{'text-primary': rulesTab === 4}" class="w-full text-left mb-[16px] relative pl-[25px]">Withdrawals Review</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
+  </div>
+</div>
   </main>
 </template>
 
@@ -700,4 +499,20 @@ export default {
 
 <style scoped>
 
+.notification-scroll {
+  max-height: 350px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+.notification-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.notification-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.notification-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
 </style>

@@ -16,6 +16,7 @@ import Courses from "../components/Courses.vue";
 import Payment from "../components/Payment.vue";
 import Checkout from "../components/Checkout.vue";
 import AdminDashboard from "../components/AdminDashboard.vue";
+import Terms from "../components/TermsAndPolicy.vue";
 
 const routes = [
     {
@@ -42,6 +43,11 @@ const routes = [
         path: '/top-up-reset',
         name: 'TopUpReset',
         component: TopUpReset
+    },
+    {
+        path: '/terms',
+        name: 'Terms',
+        component: Terms
     },
     {
         path: '/billing',
@@ -124,8 +130,8 @@ router.beforeEach((to, from, next) => {
         }
     }
 
-    if (!isAuthenticated && to.name !== 'Login' && to.name !== 'Register' && to.name !== 'ForgotPassword') {
-        // If not authenticated, redirect to login (but allow register and forgot-password)
+    if (!isAuthenticated && to.name !== 'Login' && to.name !== 'Register' && to.name !== 'ForgotPassword' && to.name !== 'Terms') {
+        // If not authenticated, redirect to login (but allow register, forgot-password, and terms)
         next({ name: 'Login' });
     } else if (isAuthenticated && (to.name === 'Login' || to.name === 'Register' || to.name === 'ForgotPassword')) {
         // If authenticated and trying to access login, register, or forgot-password, redirect to home

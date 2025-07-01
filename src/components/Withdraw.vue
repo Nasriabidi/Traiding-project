@@ -1,19 +1,196 @@
 <script setup>
+import { computed } from 'vue';
+// Withdraw Modal State
+const showWithdrawModal = ref(false);
+const withdrawAmount = ref('');
+const selectedApp = ref('');
+const usdtWalletAddress = ref('');
+const withdrawError = ref('');
+
+// Example payment apps and wallet addresses (customize as needed)
+const paymentApps = [
+  { name: 'Binance', addressKey: 'binanceUsdtAddress' },
+  { name: 'Bybit', addressKey: 'bybitUsdtAddress' },
+  { name: 'OKX', addressKey: 'okxUsdtAddress' },
+  { name: 'KuCoin', addressKey: 'kucoinUsdtAddress' },
+];
+
+const userWallets = computed(() => user.value || {});
+
+watch(selectedApp, (val) => {
+  if (val) {
+    const app = paymentApps.find(a => a.name === val);
+    usdtWalletAddress.value = app && userWallets.value[app.addressKey] ? userWallets.value[app.addressKey] : '';
+  } else {
+    usdtWalletAddress.value = '';
+  }
+});
+
+function openWithdrawModal() {
+  withdrawAmount.value = '';
+  selectedApp.value = '';
+  usdtWalletAddress.value = '';
+  withdrawError.value = '';
+  showWithdrawModal.value = true;
+}
+
+function closeWithdrawModal() {
+  showWithdrawModal.value = false;
+}
+
+import { addDoc, serverTimestamp } from 'firebase/firestore';
+const showWithdrawSuccess = ref(false);
+
+async function handleWithdrawConfirm() {
+  withdrawError.value = '';
+  const amount = parseFloat(withdrawAmount.value);
+  if (!amount || amount <= 0) {
+    withdrawError.value = 'Please enter a valid amount.';
+    return;
+  }
+  if (amount > userBalance.value) {
+    withdrawError.value = 'Amount exceeds your balance.';
+    return;
+  }
+  if (!selectedApp.value) {
+    withdrawError.value = 'Please select a payment method.';
+    return;
+  }
+  if (!usdtWalletAddress.value) {
+    withdrawError.value = 'No wallet address found for the selected app.';
+    return;
+  }
+  try {
+    await addDoc(collection(db, 'WithdrawRequest'), {
+      uid: user.value?.uid || '',
+      amount: amount,
+      paymentMethod: selectedApp.value,
+      walletAddress: usdtWalletAddress.value,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    });
+    showWithdrawModal.value = false;
+    showWithdrawSuccess.value = true;
+    setTimeout(() => { showWithdrawSuccess.value = false; }, 4000);
+  } catch (e) {
+    withdrawError.value = 'Failed to submit request. Please try again.';
+  }
+}
+
+import { ref, watch } from 'vue';
 import { useDark, useToggle } from '@vueuse/core';
 import { useUserStore } from '../stores/userStore';
 import { useRouter } from 'vue-router';
+import { storeToRefs } from 'pinia';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config';
+
+const userBalance = ref(0);
+const userTotalProfit = ref(0);
+const totalamounts = ref(0); // sum of all recharge amounts
+const accountGrowthPercent = ref(0);
 
 const router = useRouter();
 
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
 const userStore = useUserStore();
+const { user } = storeToRefs(userStore);
+
+watch(user, async (newUser) => {
+  if (newUser && newUser.uid) {
+    userBalance.value = typeof newUser.balance === 'number' ? newUser.balance : 0;
+    userTotalProfit.value = typeof newUser.totalprofit === 'number' ? newUser.totalprofit : 0;
+    // Fetch all recharge amounts and calculate totalamounts
+    try {
+      const historyCol = collection(db, 'users', newUser.uid, 'rechargeHistory');
+      const snap = await getDocs(historyCol);
+      let total = 0;
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if (
+          typeof data.amount === 'number' &&
+          data.amount > 0 &&
+          (data.visible === true)
+        ) {
+          total += data.amount;
+        }
+      });
+      totalamounts.value = total;
+    } catch (e) {
+      totalamounts.value = 0;
+    }
+    // Calculate growth percent
+    if (totalamounts.value > 0) {
+      accountGrowthPercent.value = ((userBalance.value - totalamounts.value) / totalamounts.value) * 100;
+    } else {
+      accountGrowthPercent.value = 0;
+    }
+  } else {
+    userBalance.value = 0;
+    userTotalProfit.value = 0;
+    totalamounts.value = 0;
+    accountGrowthPercent.value = 0;
+  }
+}, { immediate: true });
 
 function handleLogout() {
   localStorage.removeItem('user');
   userStore.setUser(null);
   router.push('/login');
 }
+
+const isNotification = ref(false);
+const notifications = ref([]);
+
+const currentUserId = ref('');
+const withdrawHistory = ref([]);
+
+watch(user, (newUser) => {
+  if (newUser && newUser.uid) {
+    currentUserId.value = newUser.uid;
+    fetchNotifications();
+    fetchWithdrawHistory();
+  }
+}, { immediate: true });
+
+async function fetchNotifications() {
+  if (!currentUserId.value) return;
+  const notifRef = collection(db, 'notifications');
+  const q = query(notifRef, where('userId', '==', currentUserId.value));
+  const querySnapshot = await getDocs(q);
+  notifications.value = querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })).sort((a, b) => {
+    const aTime = a.timestamp?.seconds || 0;
+    const bTime = b.timestamp?.seconds || 0;
+    return aTime - bTime;
+  });
+}
+
+async function fetchWithdrawHistory() {
+  if (!currentUserId.value) return;
+  const withdrawRef = collection(db, 'WithdrawRequest');
+  const q = query(withdrawRef, where('uid', '==', currentUserId.value));
+  const querySnapshot = await getDocs(q);
+  withdrawHistory.value = querySnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      amount: data.amount,
+      createdAt: data.createdAt,
+      paymentMethod: data.paymentMethod,
+      status: data.status
+    };
+  }).sort((a, b) => {
+    // Sort by createdAt descending (most recent first)
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    return bTime - aTime;
+  });
+}
+
 
 </script>
 <template>
@@ -32,7 +209,7 @@ function handleLogout() {
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/billing" class="trading-btn group md:!flex !hidden">
+      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
         <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
         </svg>
@@ -54,27 +231,35 @@ function handleLogout() {
         </span>
       </button>
       <div class="h-notification group">
-        <div class="hn-icon group-hover:bg-dark" @click="isNotification = !isNotification">
-          <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-                d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"></path>
-          </svg>
+  <div class="hn-icon group-hover:bg-dark" @click="isNotification = !isNotification">
+    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"></path>
+    </svg>
+  </div>
+  <transition
+    enter-active-class="transition duration-300 ease-out"
+    enter-from-class="opacity-0 scale-75"
+    enter-to-class="opacity-100 scale-100"
+    leave-active-class="transition duration-300 ease-in"
+    leave-from-class="opacity-100 scale-100"
+    leave-to-class="opacity-0 scale-75">
+    <div class="notification-open" v-if="isNotification">
+      <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
+      <div class="content text-center notification-scroll">
+        <div v-if="notifications.length === 0">
+          <p>No Notification Here</p>
         </div>
-        <transition
-            enter-active-class="transition duration-300 ease-out"
-            enter-from-class="opacity-0 scale-75"
-            enter-to-class="opacity-100 scale-100"
-            leave-active-class="transition duration-300 ease-in"
-            leave-from-class="opacity-100 scale-100"
-            leave-to-class="opacity-0 scale-75">
-          <div class="notification-open" v-if="isNotification">
-            <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
-            <div class="content text-center">
-              <p>No Notification Here</p>
-            </div>
-          </div>
-        </transition>
+        <ul v-else>
+          <li v-for="notif in notifications" :key="notif.id" class="text-left mb-3">
+            <p class="font-semibold">{{ notif.message }}</p>
+            <p class="text-xs text-gray-500">{{ new Date(notif.timestamp?.seconds * 1000).toLocaleString() }}</p>
+          </li>
+        </ul>
       </div>
+    </div>
+  </transition>
+</div>
       <div class="author-wrapper relative lg:!flex !hidden">
         <div class="author-wrap cursor-pointer" @click="isUserInfo = !isUserInfo">
           <div class="thumb">
@@ -186,7 +371,7 @@ function handleLogout() {
               <path
                   d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"></path>
             </svg>
-            <span class="text">Trading Overview</span>
+            <span class="text">Trading</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -199,48 +384,12 @@ function handleLogout() {
           </router-link>
         </li>
         <li class="nav-item">
-          <router-link to="/utilities" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M3 16h5v-2H3v2zm6.5 0h5v-2h-5v2zm6.5 0h5v-2h-5v2zM3 20h2v-2H3v2zm4 0h2v-2H7v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zM3 12h8v-2H3v2zm10 0h8v-2h-8v2zM3 4v4h18V4H3z"></path>
-            </svg>
-            <span class="text">Utilities</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
           <router-link to="/withdraw" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
               <path
                   d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z"></path>
             </svg>
             <span class="text">Withdraw</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="top-up-reset" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M11 17h2v-1h1c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3v-1h4V8h-2V7h-2v1h-1c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3v1H9v2h2v1zm9-13H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V6h16v12z"></path>
-            </svg>
-            <span class="text">Top-up & Reset</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/billing" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"></path>
-            </svg>
-            <span class="text">Billing</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/news-calendar" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"></path>
-            </svg>
-            <span class="text">News Calendar</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -252,37 +401,23 @@ function handleLogout() {
             <span class="text">Help</span>
           </router-link>
         </li>
-        <li class="nav-item">
-          <router-link to="/courses" class="nav-link group">
-            <svg class="nav-icon" fill="none" stroke-width="1.5" stroke="currentColor" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-            </svg>
-            <span class="text">Courses</span>
-          </router-link>
-        </li>
       </ul>
     </div>
-    <div class="app-info" :class="isSidebar ? 'flex' : 'xl:hidden'">
-      <span>Available On</span>
-      <a href="#"><img src="/assets/img/icon/play-store.png" alt="icon"></a>
-      <a href="#"><img src="/assets/img/icon/apple-store.png" alt="icon"></a>
-    </div>
+    <router-link to="/usdt-refund" >
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
-        </div>
+        </div>  
         <a href="#" class="app-btn">Get Funded Now</a>
       </div>
     </div>
+    </router-link>
     <div class="sidebar-shape-1"></div>
     <div class="sidebar-shape-2"></div>
   </aside>
   <main class="content-wrapper" :class="isSidebar ? 'content-wrapper' : 'xl:!pl-[73px]'">
-    <div class="dashboard-info">
-      This is a sample dashboard, start trading for real data.
-    </div>
     <div class="inner-content">
       <div class="breadcrumb-wrap">
         <div class="breadcrumb-title">
@@ -306,26 +441,26 @@ function handleLogout() {
                       <div class="xl:w-4/12 lg:w-4/12 md:w-6/12 w-full px-[15px]">
                         <div class="bg-white p-[30px] rounded-[15px] mb-[30px] dark:bg-toggle">
                           <h3 class="text-dark xl:text-[24px] text-[20px] font-semibold leading-[1.185] tracking-[-0.05px] mb-[20px] dark:text-white">
-                            Account Profit
+                            Account Balance
                           </h3>
                           <p class="text-dark xl:text-[16px] text-[15px] leading-[1.5] tracking-[-0.05px] mb-[20px] dark:text-white/70">
-                            Your account profit from your current trading cycle.
+                            Your account balance at the end of the last trading cycle.
                           </p>
-                          <p class="text-[#3E7EFF] text-[34px] font-semibold leading-[1.185] tracking-[-0.24px]">
-                            $0.00
+                          <p class="text-primary text-[34px] font-semibold leading-[1.185] tracking-[-0.24px]">
+                            ${{ userBalance.toFixed(2) }}
                           </p>
                         </div>
                       </div>
                       <div class="xl:w-4/12 lg:w-4/12 md:w-6/12 w-full px-[15px]">
                         <div class="bg-white p-[30px] rounded-[15px] mb-[30px] dark:bg-toggle">
                           <h3 class="text-dark xl:text-[24px] text-[20px] font-semibold leading-[1.185] tracking-[-0.05px] mb-[20px] dark:text-white">
-                            Withdrawable Profit
+                            Your Profit
                           </h3>
                           <p class="text-dark xl:text-[16px] text-[15px] leading-[1.5] tracking-[-0.05px] mb-[20px] dark:text-white/70">
-                            Withdrawable profit at the end of your trading cycle.
+                            Your total profit at the end of the last trading cycle.
                           </p>
                           <p class="text-primary text-[34px] font-semibold leading-[1.185] tracking-[-0.24px]">
-                            $0.00
+                            ${{ userTotalProfit.toFixed(2) }}
                           </p>
                         </div>
                       </div>
@@ -338,7 +473,7 @@ function handleLogout() {
                             Total Account Growth Percentage You've Reached
                           </p>
                           <p class="text-dark text-[34px] font-semibold leading-[1.185] tracking-[-0.24px] dark:text-white">
-                            0%
+                            {{ accountGrowthPercent > 0 ? accountGrowthPercent.toFixed(2) + '%' : '0.00%' }}
                           </p>
                         </div>
                       </div>
@@ -360,10 +495,56 @@ function handleLogout() {
                             </div>
                           </div>
                           <div class="right md:mt-0 mt-[15px]">
-                            <a href="#" class="inline-flex items-center justify-center bg-primary text-white xl:py-[10px] py-[15px] xl:px-[50px] px-[30px] font-semibold rounded-[5px] xl:min-h-[60px] capitalize">
+                            <button @click="openWithdrawModal" type="button" class="inline-flex items-center justify-center bg-primary text-white xl:py-[10px] py-[15px] xl:px-[50px] px-[30px] font-semibold rounded-[5px] xl:min-h-[60px] capitalize">
                               Withdraw Request
-                            </a>
+                            </button>
                           </div>
+                        </div>
+                        <!-- Withdraw Modal -->
+                        <transition name="fade">
+                          <div>
+                            <div v-if="showWithdrawModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
+                              <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md relative border border-gray-100 dark:border-gray-700">
+                                <button @click="closeWithdrawModal" class="absolute top-3 right-3 text-gray-400 hover:text-primary dark:hover:text-primary text-3xl transition-colors duration-200">&times;</button>
+                                <h2 class="text-2xl font-extrabold mb-6 text-dark dark:text-white text-center tracking-tight">Withdraw Request</h2>
+                                <form @submit.prevent="handleWithdrawConfirm" class="space-y-5">
+                                  <div>
+                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Withdraw Amount</label>
+                                    <input type="number" v-model="withdrawAmount" :max="userBalance" min="0.01" step="0.01"
+                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
+                                      :placeholder="'Max: $' + userBalance.toFixed(2)" />
+                                  </div>
+                                  <div>
+                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Payment Method</label>
+                                    <select v-model="selectedApp"
+                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition">
+                                      <option value="" disabled>Select App</option>
+                                      <option v-for="app in paymentApps" :key="app.name" :value="app.name">{{ app.name }}</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">USDT Wallet Address</label>
+                                    <input type="text" v-model="usdtWalletAddress"
+                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
+                                      placeholder="Enter or paste your USDT wallet address" />
+                                  </div>
+                                  <div v-if="withdrawError" class="text-red-500 text-sm text-center">{{ withdrawError }}</div>
+                                  <button type="submit"
+                                    class="w-full bg-primary text-white py-3 rounded-lg font-bold text-lg shadow-md hover:bg-primary/90 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+                                    Confirm Withdraw
+                                  </button>
+                                </form>
+                              </div>
+                            </div>
+                            <div v-if="showWithdrawSuccess" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
+                              <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md text-center border border-gray-100 dark:border-gray-700 flex flex-col items-center justify-center">
+                                <svg class="w-16 h-16 text-primary mb-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <h3 class="text-xl font-bold mb-2 text-dark dark:text-white">Your withdrawal request is currently under review.</h3>
+                              </div>
+                            </div>
+                          </div>
+                        </transition>
+                        
                         </div>
                       </div>
                     </div>
@@ -384,7 +565,7 @@ function handleLogout() {
                 <h3 class="card-title !mb-0">Withdraw History</h3>
               </div>
               <div class="content">
-                <div class="withdraw-history text-center py-[40px]">
+                <div v-if="withdrawHistory.length === 0" class="withdraw-history text-center py-[40px]">
                   <div class="thumb inline-block mb-[24px]">
                     <img src="/assets/img/thumb/thumb-11.png" alt="thumb">
                   </div>
@@ -392,13 +573,37 @@ function handleLogout() {
                     No history found!
                   </p>
                 </div>
+                <div v-else class="card-wrap p-0">
+                  <div class="trading-wrap overflow-x-auto">
+                    <div class="responsive-wrap min-w-[700px]">
+                      <div class="heading grid grid-cols-[50px_1.5fr_2fr_1.5fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
+                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">SN</p>
+                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Amount</p>
+                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Date</p>
+                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Payment Method</p>
+                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Status</p>
+                      </div>
+                      <div v-for="(item, idx) in withdrawHistory" :key="item.id" class="content grid items-center grid-cols-[50px_1.5fr_2fr_1.5fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
+                        <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ idx + 1 }}</p>
+                        <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">${{ Number(item.amount).toFixed(2) }}</p>
+                        <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.createdAt && item.createdAt.seconds ? new Date(item.createdAt.seconds * 1000).toLocaleString() : '-' }}</p>
+                        <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.paymentMethod }}</p>
+                        <p class="text-[14px] font-bold capitalize" :class="{
+                          'text-yellow-500': item.status === 'pending',
+                          'text-green-600': item.status === 'approved',
+                          'text-red-500': item.status === 'rejected'
+                        }">{{ item.status }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
         <!-- trading history end-->
       </div>
-    </div>
+    
   </main>
 </template>
 
@@ -415,6 +620,13 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.notification-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+</style>
 
 <style scoped>
 

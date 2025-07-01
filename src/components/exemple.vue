@@ -154,4 +154,5 @@
           </div>
         </div>
         <!-- trading history end-->
+         <span class="text-[#0B9201] dark:text-primary">AI</span>
         </template>

@@ -16,6 +16,7 @@ const { user } = storeToRefs(userStore);
 const userBalance = ref(0);
 const userTotalProfit = ref(0);
 const firstRechargeAmount = ref(0);
+const totalamounts = ref(0); // sum of all recharge amounts
 const accountGrowthPercent = ref(0);
 
 // Chart.js for Trading Growth Curve
@@ -30,30 +31,28 @@ watch(user, async (newUser) => {
   if (newUser && newUser.uid) {
     userBalance.value = typeof newUser.balance === 'number' ? newUser.balance : 0;
     userTotalProfit.value = typeof newUser.totalprofit === 'number' ? newUser.totalprofit : 0;
-    // Fetch first recharge amount
+    // Fetch all recharge amounts and calculate totalamounts
     try {
       const historyCol = collection(db, 'users', newUser.uid, 'rechargeHistory');
       const snap = await getDocs(historyCol);
-      const recharges = snap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter(r => typeof r.amount === 'number' && r.amount > 0)
-        .sort((a, b) => {
-          // Sort by timestamp ascending (oldest first)
-          const aTime = a.timestamp?.seconds || 0;
-          const bTime = b.timestamp?.seconds || 0;
-          return aTime - bTime;
-        });
-      if (recharges.length > 0) {
-        firstRechargeAmount.value = recharges[0].amount;
-      } else {
-        firstRechargeAmount.value = 0;
-      }
+      let total = 0;
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if (
+          typeof data.amount === 'number' &&
+          data.amount > 0 &&
+          (data.visible === true)
+        ) {
+          total += data.amount;
+        }
+      });
+      totalamounts.value = total;
     } catch (e) {
-      firstRechargeAmount.value = 0;
+      totalamounts.value = 0;
     }
-    // Calculate growth percent using the correct formula
-    if (firstRechargeAmount.value > 0) {
-      accountGrowthPercent.value = ((userBalance.value - firstRechargeAmount.value) / firstRechargeAmount.value) * 100;
+    // Calculate growth percent using the new formula
+    if (totalamounts.value > 0) {
+      accountGrowthPercent.value = ((userBalance.value - totalamounts.value) / totalamounts.value) * 100;
     } else {
       accountGrowthPercent.value = 0;
     }
@@ -290,16 +289,16 @@ function handleLogout() {
             leave-to-class="opacity-0 scale-75">
           <div class="notification-open" v-if="isNotification">
             <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
-            <div class="content text-center">
-<div v-if="notifications.length === 0">
-  <p>No Notifiction Here</p>
-</div>
-<ul v-else>
-  <li v-for="notif in notifications" :key="notif.id" class="text-left mb-3">
-    <p class="font-semibold">{{ notif.message }}</p>
-    <p class="text-xs text-gray-500">{{ new Date(notif.timestamp?.seconds * 1000).toLocaleString() }}</p>
-  </li>
-</ul>
+            <div class="content text-center notification-scroll">
+              <div v-if="notifications.length === 0">
+                <p>No Notifiction Here</p>
+              </div>
+              <ul v-else>
+                <li v-for="notif in notifications" :key="notif.id" class="text-left mb-3">
+                  <p class="font-semibold">{{ notif.message }}</p>
+                  <p class="text-xs text-gray-500">{{ new Date(notif.timestamp?.seconds * 1000).toLocaleString() }}</p>
+                </li>
+              </ul>
             </div>
           </div>
         </transition>
@@ -422,15 +421,6 @@ function handleLogout() {
           </router-link>
         </li>
         <li class="nav-item">
-          <router-link to="/utilities" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M3 16h5v-2H3v2zm6.5 0h5v-2h-5v2zm6.5 0h5v-2h-5v2zM3 20h2v-2H3v2zm4 0h2v-2H7v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zM3 12h8v-2H3v2zm10 0h8v-2h-8v2zM3 4v4h18V4H3z"></path>
-            </svg>
-            <span class="text">Utilities</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
           <router-link to="/withdraw" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
               <path
@@ -439,33 +429,7 @@ function handleLogout() {
             <span class="text">Withdraw</span>
           </router-link>
         </li>
-        <li class="nav-item">
-          <router-link to="top-up-reset" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M11 17h2v-1h1c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3v-1h4V8h-2V7h-2v1h-1c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3v1H9v2h2v1zm9-13H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V6h16v12z"></path>
-            </svg>
-            <span class="text">Top-up & Reset</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/billing" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"></path>
-            </svg>
-            <span class="text">Billing</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/news-calendar" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"></path>
-            </svg>
-            <span class="text">News Calendar</span>
-          </router-link>
-        </li>
+        
         <li class="nav-item">
           <router-link to="/help" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
@@ -475,27 +439,19 @@ function handleLogout() {
             <span class="text">Help</span>
           </router-link>
         </li>
-        <li class="nav-item">
-          <router-link to="/courses" class="nav-link group">
-            <svg class="nav-icon" fill="none" stroke-width="1.5" stroke="currentColor" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-            </svg>
-            <span class="text">Courses</span>
-          </router-link>
-        </li>
       </ul>
     </div>
+    <router-link to="/usdt-refund" >
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
-        </div>
-            <router-link to="/usdt-refund" >
-               <a href="#" class="app-btn">Get Funded Now</a>
-          </router-link>
+        </div>  
+        <a href="#" class="app-btn">Get Funded Now</a>
       </div>
     </div>
+    </router-link>
     <div class="sidebar-shape-1"></div>
     <div class="sidebar-shape-2"></div>
   </aside>
@@ -520,11 +476,33 @@ function handleLogout() {
             <div class="flex flex-wrap mx-[-15px]">
               <div class="xl:w-4/12 w-full px-[15px]">
                 <div class="dashboard-card">
-                  <div class="d-icon bg-primary">
-                    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                          d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"></path>
-                    </svg>
+                  <div >
+                    <svg class="w-[60px] mr-[10px]" width="60" height="60" xmlns="http://www.w3.org/2000/svg"
+                     viewBox="0 0 100 100" shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+                  <g id="e7LqVuKfdv12_tr" transform="translate(50.000002,50.000002) rotate(0)">
+                    <g transform="translate(-50.000002,-50.000002)">
+                      <g>
+                        <path
+                            d="M20.3,50l-3.6,3.3l4.2,2.5L18,59.7l4.6,1.6-2.1,4.4l4.8.7-1.2,4.7L29,71l-.2,4.9l4.7-1.2.7,4.8l4.4-2.1L40.2,82l3.9-2.9l2.5,4.2l3.3-3.6l3.3,3.6l2.5-4.2L59.6,82l1.6-4.6l4.4,2.1.7-4.8L71,75.9v-4.9l4.9.2-1.2-4.7l4.8-.7-2.1-4.4L82,59.8l-2.9-3.9l4.2-2.5L79.7,50l3.6-3.3-4.2-2.5L82,40.3l-4.6-1.6l2.1-4.4-4.8-.7l1.2-4.7L71,29l.2-4.9-4.7,1.2-.7-4.8-4.4,2.1L59.7,18l-3.9,2.9-2.5-4.2L50,20.3l-3.3-3.6-2.5,4.2L40.3,18l-1.6,4.6-4.4-2.1-.7,4.8-4.7-1.2L29,29l-4.9-.2l1.2,4.7-4.8.7l2.1,4.4L18,40.3l2.9,3.9-4.2,2.5L20.3,50Zm56.2,0l-3.9,2.2L76,55.1l-4.3,1.4L74.5,60l-4.4.5l2,4-4.5-.3l1.2,4.3-4.3-1.2.3,4.5-4-2-.5,4.4-3.5-2.8-1.4,4.3-2.9-3.4-2.2,3.9-2.2-3.9-2.9,3.4-1.4-4.3-3.5,2.8-.5-4.4-4,2l.3-4.5-4.3,1.2L33,64.2l-4.5.3l2-4-4.4-.5l2.8-3.5-4.2-1.4l3.4-2.9L24.2,50l3.9-2.2-3.4-2.9L29,43.5L26.1,40l4.4-.5-2-4l4.5.3-1.2-4.3l4.3,1.2-.3-4.5l4,2l.5-4.4l3.5,2.8l1.4-4.3l2.9,3.4l2.2-3.9l2.2,3.9l2.9-3.4l1.4,4.3l3.5-2.8.5,4.4l4-2-.3,4.5l4.3-1.2-1.2,4.3l4.5-.3-2,4l4.4.5-2.8,3.5l4.2,1.4-3.4,2.9l4,2.2Z"
+                            class="fill-primary"></path>
+                      </g>
+                    </g>
+                  </g>
+                  <g id="e7LqVuKfdv15_ts" transform="translate(50.300001,50) scale(1,1)">
+                    <g transform="translate(-50.300001,-50)">
+                      <g>
+                        <path
+                            d="M29.8,50c0,11.3,9.2,20.5,20.5,20.5s20.5-9.2,20.5-20.5-9.2-20.5-20.5-20.5-20.5,9.2-20.5,20.5Z"
+                            class="fill-primary"></path>
+                        <g>
+                          <path
+                              d="M59.5,59.9c-.8,1.2-1.9,2.1-3.4,2.8s-3.3,1.1-5.4,1.1v3h-1.6v-3.1c-2.8-.2-5-1.1-6.7-2.5s-2.7-3.4-2.9-5.8h6.9c.1.8.3,1.5.8,2c.5.6,1.1.9,1.9,1.1v-6c-.4-.1-.7-.2-.8-.3-1.8-.5-3.3-1.1-4.5-1.6s-2.2-1.3-3-2.4-1.3-2.5-1.3-4.3c0-1.5.4-2.9,1.3-4.1.8-1.2,2-2,3.5-2.7c1.5-.6,3.1-1,4.9-1v-3.1h1.6v3.1c2.8.2,5,1,6.6,2.4s2.6,3.2,2.8,5.5h-7c-.1-.8-.4-1.4-.8-1.9s-.9-.8-1.6-1v5.9l1.2.4c1.8.6,3.3,1.1,4.5,1.7c1.1.5,2.1,1.3,3,2.4.8,1.1,1.2,2.4,1.2,4.2-.1,1.7-.4,3-1.2,4.2ZM47.1,45.5c.5.5,1.1.9,2,1.3v-5.5c-.9.1-1.5.3-2,.7s-.7,1-.7,1.8c0,.7.2,1.2.7,1.7ZM52.9,58c.5-.5.8-1.1.8-1.9c0-.7-.3-1.3-.8-1.8s-1.2-.9-2.2-1.2v5.7c1,0,1.7-.3,2.2-.8Z"
+                              fill="#fff"></path>
+                        </g>
+                      </g>
+                    </g>
+                  </g>
+                </svg>
                   </div>
                   <div class="content">
                     <h2>${{ userBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</h2>
@@ -537,11 +515,36 @@ function handleLogout() {
               </div>
               <div class="xl:w-4/12 w-full px-[15px]">
                 <div class="dashboard-card">
-                  <div class="d-icon bg-primary">
-                    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
+                  <div >
+                    <svg class="w-[60px] mr-[10px]" width="60" height="60" id="eRgerznCjqO1"
+                     xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" shape-rendering="geometricPrecision"
+                     text-rendering="geometricPrecision">
+                  <g id="eRgerznCjqO2_tr" transform="translate(87.1,60.5) rotate(0)">
+                    <g transform="translate(-87.1,-60.5)">
                       <path
-                          d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"></path>
-                    </svg>
+                          d="M61.2,57.8c-.3.1-1.8.5-3.7,1-1.2.3-2.4.6-3.5.9l-.2.1c-4.2,1.1-8.6,2.3-9.5,2.5-.1,0-.3,0-.4,0-.4,0-.7,0-1.1-.1L27.9,52.5l-2.7-2v0c-.1-.1-.3-.2-.4-.2-.2-.1-.4-.2-.6-.3-.2,0-.4,0-.6-.1-.2,0-.4,0-.6,0-.3,0-.5,0-.8.1-2.2.2-3.9,2-3.9,4.3c0,1.2.5,2.3,1.3,3v0v0c.3.3.7.6,1.1.8l1,.7l23.4,17v0c.1,0,.2.1.3.1.5.2,1.1.3,1.7.3.3,0,.7,0,1-.1h.1c7.9-2,24.3-6.2,32-8.1.2-.1.4-.1.6-.2c2-.5,4.6-1.1,6.3-1.1v-1.1v0-1.5-9.7-.4-.1c-5,0-8-3-11.7-5.6-2.7-1.9-5.6-3.5-9.9-3.5-1.9,0-3.6,0-4.9.1h-10.2c-1.5,0-2.7,1.2-2.7,2.7s1.2,2.7,2.7,2.7h5.7h3.8c1.9.3,3.4,2,3.4,4c0,1.5-.9,2.8-2.1,3.5Z"
+                          class="fill-primary"></path>
+                    </g>
+                  </g>
+                  <g id="eRgerznCjqO4_to" transform="translate(35.75,39.599998)">
+                    <g id="eRgerznCjqO4_ts" transform="scale(1,1)">
+                      <g transform="translate(-35.75,-39.599998)">
+                        <g>
+                          <g>
+                            <path
+                                d="M24,39.6c0,6.5,5.3,11.8,11.8,11.8s11.7-5.4,11.7-11.8-5.3-11.8-11.8-11.8-11.7,5.3-11.7,11.8Z"
+                                class="fill-primary"></path>
+                            <g>
+                              <path
+                                  d="M41,45.2c-.5.7-1.1,1.2-2,1.6s-1.9.6-3.1.6v1.7h-.9v-1.8c-1.6-.1-2.9-.6-3.8-1.4s-1.5-2-1.7-3.3h4c.1.5.2.9.5,1.1.3.3.6.5,1.1.6v-3.3c-.2-.1-.4-.1-.5-.2-1-.3-1.9-.6-2.6-.9s-1.3-.7-1.7-1.4c-.5-.6-.7-1.4-.7-2.5c0-.9.2-1.7.7-2.4s1.1-1.1,2-1.5c.9-.3,1.8-.6,2.8-.6v-1.8h.9v1.8c1.6.1,2.9.6,3.8,1.4s1.5,1.8,1.6,3.2h-4c-.1-.5-.2-.8-.5-1.1-.2-.3-.5-.5-.9-.6v3.4l.7.2c1,.3,1.9.6,2.6,1c.6.3,1.2.7,1.7,1.4.5.6.7,1.4.7,2.4s-.2,1.8-.7,2.4v0ZM33.9,37c.3.3.6.5,1.1.7v-3.2c-.5.1-.9.2-1.1.4-.3.2-.4.6-.4,1c0,.5.1.8.4,1.1Zm3.3,7.2c.3-.3.5-.6.5-1.1c0-.4-.2-.7-.5-1s-.7-.5-1.3-.7v3.3c.6-.1,1-.3,1.3-.5Z"
+                                  fill="#fff"></path>
+                            </g>
+                          </g>
+                        </g>
+                      </g>
+                    </g>
+                  </g>
+                </svg>
                   </div>
                   <div class="content">
                     <h2>${{ userTotalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</h2>
@@ -554,10 +557,34 @@ function handleLogout() {
               </div>
               <div class="xl:w-4/12 w-full px-[15px]">
                 <div class="dashboard-card">
-                  <div class="d-icon bg-primary">
-                    <svg class="icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"></path>
-                    </svg>
+                  <div >
+                    <svg class="w-[60px] mr-[10px]" width="60" height="60" xmlns="http://www.w3.org/2000/svg"
+                     viewBox="0 0 100 100"
+                     shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+                  <g id="e71mu0h2A952_ts" transform="translate(53.8,46.9) scale(1,1)">
+                    <g transform="translate(-53.8,-46.9)">
+                      <g>
+                        <polygon points="62.2,52.5 68.4,32.9 64.1,37.3 59.7,51.1" class="fill-dark"></polygon>
+                        <polygon points="59,50.7 62.8,38.6 58.5,43.1 56.5,49.4" class="fill-dark"></polygon>
+                        <path d="M71.9,57.6L78,38.4c-.5-1.3-1.1-2.5-1.8-3.6L69.4,56.3l2.5,1.3Z"
+                              class="fill-dark"></path>
+                        <path d="M75.2,59.4l4.6-14.5c-.2-1.8-.7-3.5-1.3-5.2L72.7,58l2.5,1.4Z" class="fill-dark"></path>
+                        <path d="M77.4,60.6C79.3,57,80,52.7,80,48.3c0-.5,0-.9,0-1.4L76,59.8l1.4.8Z"
+                              class="fill-dark"></path>
+                        <path d="M63,52.8l2.5,1.3L73,30.3c-.3-.4-.7-.7-1-1.1l-2.3,2.4L63,52.8Z"
+                              class="fill-dark"></path>
+                        <polygon points="57.2,44.4 53.8,47.9 55.8,49" class="fill-dark"></polygon>
+                        <path d="M68.7,55.9l6.9-22.1c-.6-1-1.3-1.9-2-2.8L66.2,54.5l2.5,1.4Z" class="fill-dark"></path>
+                      </g>
+                    </g>
+                  </g>
+                  <g>
+                    <path d="M69.4,26.6c-4-3.7-10-6.2-16.3-6.3L53,43.6l16.4-17Z" class="fill-primary"></path>
+                    <path
+                        d="M48.7,20.1C32.2,20.1,20,33.5,20,50s13.4,29.9,29.9,29.9c11.6,0,22.3-6.8,26.3-15.6L49.3,50v-29.8c-.2-.1-.4-.1-.6-.1Z"
+                        class="fill-primary"></path>
+                  </g>
+                </svg>
                   </div>
                   <div class="content">
                     <h2>{{ accountGrowthPercent > 0 ? accountGrowthPercent.toFixed(2) + '%' : '0.00%' }}</h2>
@@ -660,5 +687,11 @@ export default {
 }
 .animate-shake {
   animation: shake 0.7s cubic-bezier(.36,.07,.19,.97) both;
+}
+</style>
+<style scoped>
+.notification-scroll {
+  max-height: 320px;
+  overflow-y: auto;
 }
 </style>

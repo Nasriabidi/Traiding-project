@@ -372,15 +372,22 @@ const toggleDark = useToggle(isDark);
 watch(
   () => userStore.user,
   (newUser) => {
-    if (newUser && newUser.allowsession === false) {
-      buyDisabled.value = true;
-      sellDisabled.value = true;
-      tradingDisabledMessage.value =
-        'Trading is temporarily disabled: Our AI analysis has detected that current market conditions are too volatile or unfavorable for safe trading. Please check back later when the market stabilizes.';
-    } else {
-      buyDisabled.value = false;
-      sellDisabled.value = false;
-      tradingDisabledMessage.value = '';
+    if (newUser) {
+      if (newUser.allowsession === false) {
+        buyDisabled.value = true;
+        sellDisabled.value = true;
+        tradingDisabledMessage.value =
+          'Trading is temporarily disabled: Our AI analysis has detected that current market conditions are too volatile or unfavorable for safe trading. Please check back later when the market stabilizes.';
+      } else if (newUser.allowsession === true && (newUser.balance === 0 || newUser.balance === undefined)) {
+        buyDisabled.value = true;
+        sellDisabled.value = true;
+        tradingDisabledMessage.value =
+          'Your account balance is currently $0. Please recharge your account to start trading.';
+      } else {
+        buyDisabled.value = false;
+        sellDisabled.value = false;
+        tradingDisabledMessage.value = '';
+      }
     }
   },
   { immediate: true }
@@ -435,12 +442,6 @@ watch(() => userStore.user?.uid, (uid) => {
       </div>
     </div>
     <div class="header-right">
-      <router-link to="/trading-overview" class="trading-btn group md:!flex !hidden">
-        <svg class="trading-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z"></path>
-        </svg>
-        Start Trading
-      </router-link>
       <button
           @click="toggleDark()"
           class="flex justify-center items-center w-[48px] h-[48px] rounded-full transition-all duration-300 ease-linear outline-0 cursor-pointer bg-dark dark:bg-white"
@@ -472,7 +473,7 @@ watch(() => userStore.user?.uid, (uid) => {
             leave-to-class="opacity-0 scale-75">
           <div class="notification-open" v-if="isNotification">
             <h1 class="text-dark font-bold pb-[15px] mb-[20px] border-b border-dark dark:text-white dark:border-white">Notifications</h1>
-            <div class="content text-center">
+            <div class="content text-center notification-scroll">
               <div v-if="notifications.length === 0">
                 <p>No Notification Here</p>
               </div>
@@ -597,7 +598,7 @@ watch(() => userStore.user?.uid, (uid) => {
               <path
                   d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"></path>
             </svg>
-            <span class="text">Trading Overview</span>
+            <span class="text">Trading</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -610,48 +611,12 @@ watch(() => userStore.user?.uid, (uid) => {
           </router-link>
         </li>
         <li class="nav-item">
-          <router-link to="/utilities" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M3 16h5v-2H3v2zm6.5 0h5v-2h-5v2zm6.5 0h5v-2h-5v2zM3 20h2v-2H3v2zm4 0h2v-2H7v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zm4 0h2v-2h-2v2zM3 12h8v-2H3v2zm10 0h8v-2h-8v2zM3 4v4h18V4H3z"></path>
-            </svg>
-            <span class="text">Utilities</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
           <router-link to="/withdraw" class="nav-link group">
             <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
               <path
                   d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z"></path>
             </svg>
             <span class="text">Withdraw</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="top-up-reset" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M11 17h2v-1h1c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3v-1h4V8h-2V7h-2v1h-1c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3v1H9v2h2v1zm9-13H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V6h16v12z"></path>
-            </svg>
-            <span class="text">Top-up & Reset</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/billing" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"></path>
-            </svg>
-            <span class="text">Billing</span>
-          </router-link>
-        </li>
-        <li class="nav-item">
-          <router-link to="/news-calendar" class="nav-link group">
-            <svg class="nav-icon" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                  d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"></path>
-            </svg>
-            <span class="text">News Calendar</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -663,27 +628,19 @@ watch(() => userStore.user?.uid, (uid) => {
             <span class="text">Help</span>
           </router-link>
         </li>
-        <li class="nav-item">
-          <router-link to="/courses" class="nav-link group">
-            <svg class="nav-icon" fill="none" stroke-width="1.5" stroke="currentColor" focusable="false" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-            </svg>
-            <span class="text">Courses</span>
-          </router-link>
-        </li>
       </ul>
     </div>
+    <router-link to="/usdt-refund" >
     <div class="app-bottom" :class="isSidebar ? 'block' : 'xl:hidden'">
       <div class="app-account">
         <h4>Start New <span>Account</span></h4>
         <div class="thumb">
           <img class="h-[90px]" src="/assets/img/thumb/thumb-2.png" alt="thumb">
-        </div>
-          <router-link to="/usdt-refund" >
-               <a href="#" class="app-btn">Get Funded Now</a>
-          </router-link>
+        </div>  
+        <a href="#" class="app-btn">Get Funded Now</a>
       </div>
     </div>
+    </router-link>
     <div class="sidebar-shape-1"></div>
     <div class="sidebar-shape-2"></div>
   </aside>
@@ -861,5 +818,8 @@ export default {
 </script>
 
 <style scoped>
-
+.notification-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
 </style>
