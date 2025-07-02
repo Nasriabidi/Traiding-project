@@ -194,6 +194,51 @@ async function fetchWithdrawHistory() {
 
 </script>
 <template>
+  <!-- Withdraw Modal (always at the top of the template for proper stacking) -->
+  <transition name="fade">
+    <div>
+      <div v-if="showWithdrawModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
+        <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md relative border border-gray-100 dark:border-gray-700">
+          <button @click="closeWithdrawModal" class="absolute top-3 right-3 text-gray-400 hover:text-primary dark:hover:text-primary text-3xl transition-colors duration-200">&times;</button>
+          <h2 class="text-2xl font-extrabold mb-6 text-dark dark:text-white text-center tracking-tight">Withdraw Request</h2>
+          <form @submit.prevent="handleWithdrawConfirm" class="space-y-5">
+            <div>
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Withdraw Amount</label>
+              <input type="number" v-model="withdrawAmount" :max="userBalance" min="0.01" step="0.01"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
+                :placeholder="'Max: $' + userBalance.toFixed(2)" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Payment Method</label>
+              <select v-model="selectedApp"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition">
+                <option value="" disabled>Select App</option>
+                <option v-for="app in paymentApps" :key="app.name" :value="app.name">{{ app.name }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-2">USDT Wallet Address</label>
+              <input type="text" v-model="usdtWalletAddress"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
+                placeholder="Enter or paste your USDT wallet address" />
+            </div>
+            <div v-if="withdrawError" class="text-red-500 text-sm text-center">{{ withdrawError }}</div>
+            <button type="submit"
+              class="w-full bg-primary text-white py-3 rounded-lg font-bold text-lg shadow-md hover:bg-primary/90 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+              Confirm Withdraw
+            </button>
+          </form>
+        </div>
+      </div>
+      <div v-if="showWithdrawSuccess" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
+        <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md text-center border border-gray-100 dark:border-gray-700 flex flex-col items-center justify-center">
+          <svg class="w-16 h-16 text-primary mb-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <h3 class="text-xl font-bold mb-2 text-dark dark:text-white">Your withdrawal request is currently under review.</h3>
+        </div>
+      </div>
+    </div>
+  </transition>
+  <!-- End Withdraw Modal -->
   <header class="header-area" :class="isSidebar ? 'header-area' : 'xl:!w-[calc(100%-73px)] xl:!ml-[73px]'">
     <div class="header-left">
       <div class="toggle-menu group xl:!flex !hidden" @click="isSidebar = !isSidebar">
@@ -500,50 +545,7 @@ async function fetchWithdrawHistory() {
                             </button>
                           </div>
                         </div>
-                        <!-- Withdraw Modal -->
-                        <transition name="fade">
-                          <div>
-                            <div v-if="showWithdrawModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
-                              <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md relative border border-gray-100 dark:border-gray-700">
-                                <button @click="closeWithdrawModal" class="absolute top-3 right-3 text-gray-400 hover:text-primary dark:hover:text-primary text-3xl transition-colors duration-200">&times;</button>
-                                <h2 class="text-2xl font-extrabold mb-6 text-dark dark:text-white text-center tracking-tight">Withdraw Request</h2>
-                                <form @submit.prevent="handleWithdrawConfirm" class="space-y-5">
-                                  <div>
-                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Withdraw Amount</label>
-                                    <input type="number" v-model="withdrawAmount" :max="userBalance" min="0.01" step="0.01"
-                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
-                                      :placeholder="'Max: $' + userBalance.toFixed(2)" />
-                                  </div>
-                                  <div>
-                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Payment Method</label>
-                                    <select v-model="selectedApp"
-                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition">
-                                      <option value="" disabled>Select App</option>
-                                      <option v-for="app in paymentApps" :key="app.name" :value="app.name">{{ app.name }}</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label class="block text-sm font-semibold text-dark dark:text-white mb-2">USDT Wallet Address</label>
-                                    <input type="text" v-model="usdtWalletAddress"
-                                      class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
-                                      placeholder="Enter or paste your USDT wallet address" />
-                                  </div>
-                                  <div v-if="withdrawError" class="text-red-500 text-sm text-center">{{ withdrawError }}</div>
-                                  <button type="submit"
-                                    class="w-full bg-primary text-white py-3 rounded-lg font-bold text-lg shadow-md hover:bg-primary/90 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
-                                    Confirm Withdraw
-                                  </button>
-                                </form>
-                              </div>
-                            </div>
-                            <div v-if="showWithdrawSuccess" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
-                              <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md text-center border border-gray-100 dark:border-gray-700 flex flex-col items-center justify-center">
-                                <svg class="w-16 h-16 text-primary mb-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                <h3 class="text-xl font-bold mb-2 text-dark dark:text-white">Your withdrawal request is currently under review.</h3>
-                              </div>
-                            </div>
-                          </div>
-                        </transition>
+                        <!-- Withdraw Modal moved to top of template for proper stacking -->
                         
                         </div>
                       </div>
