@@ -788,7 +788,7 @@ watch(() => userStore.user?.uid, (uid) => {
                   </p>
                   <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.closeprice || item.finalprice }}</p>
                   <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.profit }}</p>
-                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.commission }}</p>
+                  <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ Number(item.commission).toFixed(2) }}</p>
                   <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.cryptopair }}</p>
                   <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.type }}</p>
                 </div>

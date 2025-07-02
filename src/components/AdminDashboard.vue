@@ -475,7 +475,8 @@ watch([selectedSessionUser, filteredLiveSessions], ([user, sessions]) => {
 watch(selectedCalcSessionId, (id) => {
   const session = filteredLiveSessions.value.find(s => s.id === id);
   if (session) {
-    calcCurrentPrice.value = typeof session.currentprice === 'number' ? session.currentprice : 0;
+    // Use openprice instead of currentprice for the calculator
+    calcCurrentPrice.value = typeof session.openprice === 'number' ? session.openprice : 0;
     calcProfit.value = typeof session.profit === 'number' ? session.profit : 0;
   }
 });
