@@ -234,8 +234,8 @@ function handleLogout() {
       </div>
       <div class="logo text-center h-[80px] xl:!hidden !flex items-center justify-center">
         <router-link to="/">
-          <img class="inline-block w-[120px] hidden dark:block" src="/assets/img/logo/logo-dark2.png" alt="logo">
-          <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/logo-dark2.png" alt="logo">
+          <img class="inline-block w-[80px] hidden dark:block" src="/assets/img/logo/logo-dark2.png" alt="logo">
+          <img class="inline-block w-[80px] block dark:hidden" src="/assets/img/logo/Ab.png" alt="logo">
         </router-link>
       </div>
     </div>
@@ -637,22 +637,26 @@ function handleLogout() {
           </div>
           <div class="xl:w-3/12 w-full px-[15px]">
             <div class="card-wrap text-center">
-              <h3 class="card-title">Account Manager</h3>
+              <h3 class="card-title">Customer Service </h3>
               <div class="content">
                 <div class="thumb w-[80px] h-[80px] bg-primary rounded-full overflow-hidden mx-auto mb-[15px] inline-flex items-center justify-center">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-[40px] stroke-white">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
                   </svg>
                 </div>
-                <h4 class="text-dark text-[15px] font-medium leading-[1.167] tracking-[-0.05px] dark:text-white">Prop Manager1</h4>
-                <div class="flex flex-wrap items-center px-[16px] py-[18px] rounded-[6px] mt-[15px] bg-white">
+                <h4 class="text-dark text-[15px] font-medium leading-[1.167] tracking-[-0.05px] dark:text-white"></h4>
+                <a
+                  href="https://t.me/CustomerService" target="_blank" rel="noopener noreferrer"
+                  class="flex flex-wrap items-center px-[16px] py-[18px] rounded-[6px] mt-[15px] bg-white cursor-pointer  transition"
+                  title="Contact us on Telegram"
+                >
                   <svg class="icon w-[24px] h-[24px] mr-[16px] fill-primary" focusable="false" viewBox="0 0 24 24"
                        aria-hidden="true">
                     <path
                         d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"></path>
                   </svg>
-                  <span class="flex-1 break-all text-[14px] text-dark text-left">Traid Dashboard</span>
-                </div>
+                  <span class="flex-1 break-all text-[14px] text-dark text-left">Contact Support</span>
+                </a>
               </div>
             </div>
           </div>

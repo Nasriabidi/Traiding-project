@@ -384,12 +384,6 @@ const handlePasswordChange = async () => {
                       <img class="mr-[10px]" src="/assets/img/icon/account.svg" alt="icon">
                       Account Information
                     </button>
-                    <button class="w-full text-dark 2xl:text-[16px] text-[14px] font-semibold flex items-center 2xl:px-[30px] px-[15px] py-[15px] mb-[16px] dark:text-white"
-                            :class="{'': openTab !== 3, 'bg-white border-r-[5px] border-primary dark:text-dark': openTab === 3}"
-                            @click="toggleTabs(3)">
-                      <img class="mr-[10px]" src="/assets/img/icon/telegram.svg" alt="icon">
-                      Telegram Settings
-                    </button>
                   </div>
                 </div>
               </div>
@@ -458,22 +452,6 @@ const handlePasswordChange = async () => {
                       </div>
                     </div>
                   </form>
-                </div>
-              </div>
-            </div>
-            <div :class="{'hidden': openTab !== 3, 'block': openTab === 3}">
-              <div class="p-[30px] mb-[30px] rounded-[10px] bg-[#F5F9FF] relative z-10 overflow-hidden flex items-center justify-between gap-[20px] lg:flex-nowrap flex-wrap dark:bg-dark">
-                <div class="content xl:py-[50px] pb-[30px]">
-                  <h3 class="text-dark lg:text-[28px] text-[20px] font-semibold mb-[22px] dark:text-white">Telegram</h3>
-                  <p class="text-dark xl:text-[18px] text-[16px] max-w-[500px] mb-[30px] dark:text-white/70">
-                    Connect your Telegram account to get all of your account notification in your Telegram account
-                  </p>
-                  <button class="xl:px-[50px] px-[30px] xl:h-[60px] h-[50px] xl:text-[16px] text-[14px] text-white text-center bg-primary rounded-[10px]">
-                    Connect Telegram
-                  </button>
-                </div>
-                <div class="thumb">
-                  <img src="/assets/img/thumb/thumb-12.png" alt="thumb">
                 </div>
               </div>
             </div>

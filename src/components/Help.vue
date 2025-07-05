@@ -56,8 +56,8 @@ async function fetchNotifications() {
       </div>
       <div class="logo text-center h-[80px] xl:!hidden !flex items-center justify-center">
         <router-link to="/">
-          <img class="inline-block h-[50px] hidden dark:block" src="/assets/img/logo/logo-s.png" alt="logo">
-          <img class="inline-block h-[50px] block dark:hidden" src="/assets/img/logo/logo-dark.png" alt="logo">
+          <img class="inline-block w-[80px] hidden dark:block" src="/assets/img/logo/logo-dark2.png" alt="logo">
+          <img class="inline-block w-[80px] block dark:hidden" src="/assets/img/logo/Ab.png" alt="logo">
         </router-link>
       </div>
     </div>
