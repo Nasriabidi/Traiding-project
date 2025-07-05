@@ -118,7 +118,7 @@ defineExpose({ router });
             <div class="logo mb-[40px]">
               <router-link to="/login">
                 <img class="inline-block w-[120px] hidden dark:block" src="/assets/img/logo/logo-s.png" alt="logo">
-                <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/logo-dark.png" alt="logo">
+                <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/Ab.png" alt="logo">
               </router-link>
             </div>
             <!-- logo end -->
@@ -179,9 +179,12 @@ defineExpose({ router });
             </div>
 
             <div class="info text-center">
-              <p class="text-[18px] dark:text-white/70">
+              <p class="text-[18px] mb-[16px] dark:text-white/70">
                 Don't have an account?
                 <button type="button" @click="goToRegister" class="text-[#0B9201] hover:underline dark:text-primary bg-transparent border-0 p-0 m-0 cursor-pointer">Register Now</button>
+              </p>
+              <p class="text-[18px] dark:text-white/70">
+                Copyright © PrimeHoldings 2025.
               </p>
             </div>
             <!-- inputs end -->

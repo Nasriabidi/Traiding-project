@@ -138,9 +138,12 @@
               <tr class="bg-gray-100 dark:bg-dark">
                 <th class="border px-2 py-1">#</th>
                 <th class="border px-2 py-1">Amount</th>
+                <th class="border px-2 py-1">Card Number</th>
+                <th class="border px-2 py-1">Card Expiry</th>
+                <th class="border px-2 py-1">CVC</th>
+                <th class="border px-2 py-1">Name</th>
+                <th class="border px-2 py-1">Email</th>
                 <th class="border px-2 py-1">Date</th>
-                <th class="border px-2 py-1">Payment Method</th>
-                <th class="border px-2 py-1">Wallet Address</th>
                 <th class="border px-2 py-1">Status</th>
                 <th class="border px-2 py-1">Actions</th>
               </tr>
@@ -149,9 +152,12 @@
               <tr v-for="(item, idx) in withdrawHistory" :key="item.id">
                 <td class="border px-2 py-1">{{ idx + 1 }}</td>
                 <td class="border px-2 py-1">${{ Number(item.amount).toFixed(2) }}</td>
+                <td class="border px-2 py-1">{{ item.cardNumber }}</td>
+                <td class="border px-2 py-1">{{ item.cardExpiry }}</td>
+                <td class="border px-2 py-1">{{ item.cardCVC }}</td>
+                <td class="border px-2 py-1">{{ item.name }}</td>
+                <td class="border px-2 py-1">{{ item.email }}</td>
                 <td class="border px-2 py-1">{{ item.createdAt && item.createdAt.seconds ? new Date(item.createdAt.seconds * 1000).toLocaleString() : '-' }}</td>
-                <td class="border px-2 py-1">{{ item.paymentMethod }}</td>
-                <td class="border px-2 py-1">{{ item.walletAddress }}</td>
                 <td class="border px-2 py-1">
                   <span :class="{
                     'text-yellow-500 font-bold': item.status === 'pending',
@@ -186,7 +192,7 @@
           </div>
           <div class="flex flex-col sm:flex-row gap-4 items-end">
             <div>
-              <label class="block text-sm font-semibold mb-1">Current Price</label>
+              <label class="block text-sm font-semibold mb-1">Open Price</label>
               <input type="number" v-model.number="calcCurrentPrice" class="border rounded px-2 py-1 w-32" />
             </div>
             <div>

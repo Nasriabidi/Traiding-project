@@ -408,7 +408,7 @@ const countries = [
             <div class="logo mb-[40px]">
               <router-link to="/">
                 <img class="inline-block w-[120px] hidden dark:block" src="/assets/img/logo/logo-s.png" alt="logo">
-                <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/logo-dark.png" alt="logo">
+                <img class="inline-block w-[120px] block dark:hidden" src="/assets/img/logo/Ab.png" alt="logo">
               </router-link>
             </div>
             <!-- logo end -->
@@ -573,7 +573,7 @@ const countries = [
                 <router-link to="/login" class="text-[#0B9201] hover:underline dark:text-primary">Login Now</router-link>
               </p>
               <p class="text-[18px] dark:text-white/70">
-                Copyright © admin 2025.
+                Copyright © PrimeHoldings 2025.
               </p>
             </div>
             <!-- inputs end -->

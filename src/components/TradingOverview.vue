@@ -68,6 +68,7 @@ const sessionId = ref(null);
 const sessionData = ref(null);
 const finalPrice = ref(null);
 const sessionClosedMessage = ref(null);
+const sessionOpenMessage = ref(null);
 const allowEndSession = ref(false);
 const tradingDisabledMessage = ref('');
 
@@ -105,18 +106,18 @@ function getTotalProfit() {
 }
 
 async function handleTrade(type) {
-  // If session is active, only allow closing with the opposite button
+  // Only allow starting a new session if there is no active session
   if (sessionId.value && sessionData.value && !sessionData.value.sessionend) {
-    // Only allow closing with the opposite type and if allowendsession is true
-    if (
-      type !== (sessionData.value.type === 'buy' ? 'sell' : 'buy') ||
-      !sessionData.value.allowendsession
-    ) return;
-    await handleCloseSession();
+    // Session is already active, do nothing
     return;
   }
   if (type === 'buy') buyDisabled.value = true;
   if (type === 'sell') sellDisabled.value = true;
+  // Show session open message
+  sessionOpenMessage.value = 'A trading session is now open.';
+  setTimeout(() => {
+    sessionOpenMessage.value = null;
+  }, 6000);
   // Always get the latest balance from userStore.user
   const balance = userStore.user?.balance || 0;
   const leverage = selectedLeverage.value;
@@ -326,6 +327,14 @@ watch(sessionId, (id) => {
     });
   }
 });
+
+// Handle Close Position button click: show alert if not allowed, else close session
+function onClosePositionClick() {
+  if (sessionData.value && sessionData.value.allowendsession === false) {
+    return;
+  }
+  handleCloseSession();
+}
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useRouter } from 'vue-router';
@@ -401,7 +410,8 @@ async function fetchTradingHistory() {
   loadingHistory.value = true;
   const q = query(
     collection(db, 'traidsession'),
-    where('userId', '==', userStore.user.uid)
+    where('userId', '==', userStore.user.uid),
+    where('sessionend', '==', true)
   );
   const querySnapshot = await getDocs(q);
   tradingHistory.value = querySnapshot.docs.map(doc => ({
@@ -655,10 +665,13 @@ watch(() => userStore.user?.uid, (uid) => {
           Trading Overview
         </div>
       </div>
+      <div v-if="sessionOpenMessage" class="mb-4 p-4 rounded bg-green-100 text-green-800 font-semibold text-center border border-green-300">
+        {{ sessionOpenMessage }}
+      </div>
       <div v-if="sessionClosedMessage" class="mb-4 p-4 rounded bg-green-100 text-green-800 font-semibold text-center border border-green-300">
         {{ sessionClosedMessage }}
       </div>
-      <div v-if="tradingDisabledMessage" class="mb-4 p-4 rounded bg-yellow-100 text-yellow-800 font-semibold text-center border border-yellow-300">
+      <div v-if="tradingDisabledMessage" class="mb-4 p-4 rounded bg-green-100 text-green-800 font-semibold text-center border border-green-300">
         {{ tradingDisabledMessage }}
       </div>
       <div class="dashboard-wrapper">
@@ -681,26 +694,29 @@ watch(() => userStore.user?.uid, (uid) => {
               <label class="font-semibold text-dark dark:text-white">Current Price</label>
               <div class="text-lg font-bold">{{ currentPrice ? currentPrice.toLocaleString() : '...' }}</div>
             </div>
-            <div class="flex gap-2 items-end">
-<button
-  :disabled="
-    (sessionId && sessionData && !sessionData.sessionend && sessionData.type === 'buy') || buyDisabled
-  "
-  @click="handleTrade('buy')"
-  class="px-6 py-2 rounded bg-green-500 text-white font-bold disabled:opacity-50"
->
-  Buy
-</button>
-<button
-  :disabled="
-    (sessionId && sessionData && !sessionData.sessionend && sessionData.type === 'sell') || sellDisabled
-  "
-  @click="handleTrade('sell')"
-  class="px-6 py-2 rounded bg-red-500 text-white font-bold disabled:opacity-50"
->
-  Sell
-</button>
-            </div>
+<div class="flex gap-2 items-end">
+  <button
+    :disabled="sessionId && sessionData && !sessionData.sessionend || buyDisabled"
+    @click="handleTrade('buy')"
+    class="px-6 py-2 rounded bg-green-500 text-white font-bold disabled:opacity-50"
+  >
+    Buy
+  </button>
+  <button
+    :disabled="sessionId && sessionData && !sessionData.sessionend || sellDisabled"
+    @click="handleTrade('sell')"
+    class="px-6 py-2 rounded bg-red-500 text-white font-bold disabled:opacity-50"
+  >
+    Sell
+  </button>
+  <button
+    v-if="sessionId && sessionData && !sessionData.sessionend"
+    @click="onClosePositionClick"
+    class="px-6 py-2 rounded bg-yellow-500 text-white font-bold"
+  >
+    Close Position
+  </button>
+</div>
           </div>
           <div class="mt-6 flex flex-col md:flex-row gap-6">
             <div class="flex-1">

