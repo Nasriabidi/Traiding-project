@@ -19,14 +19,16 @@ RUN npm run build
 # === Stage 2 : Production ===
 FROM nginx:stable-alpine AS production-stage
 
-# Supprimer le contenu par défaut de Nginx
-RUN rm -rf /usr/share/nginx/
+# Remove default config
+RUN rm /etc/nginx/conf.d/default.conf
 
-# Copier les fichiers buildés vers le dossier HTML de Nginx
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built files
 COPY --from=build-stage /app/dist /usr/share/nginx/html
 
-# Exposer le port 80
 EXPOSE 80
 
-# Démarrer nginx
 CMD ["nginx", "-g", "daemon off;"]
+
