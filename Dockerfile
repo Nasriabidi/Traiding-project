@@ -19,6 +19,9 @@ RUN npm run build
 # === Stage 2 : Production ===
 FROM nginx:stable-alpine AS production-stage
 
+# Upgrade system packages to fix CVEs like libxml2
+RUN apk update && apk upgrade --no-cache
+
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf
 
