@@ -1,0 +1,31 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    tools {
+    nodejs "NodeJS"  // 👈 use the same name you gave in Jenkins Tools
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Nasriabidi/Traiding-project.git'
+            }
+        }
+
+        stage('SonarCloud Analysis') {
+            steps {
+                withSonarQubeEnv('SonarCloud') {
+                    sh 'npm ci'
+                    sh 'npx sonar-scanner'
+                }
+            }
+        }
+
+    }
+}
+

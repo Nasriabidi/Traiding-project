@@ -1,20 +1,32 @@
-# Use Node base image
-FROM node:20-alpine
+# === Stage 1 : Build ===
+FROM node:18 AS build-stage
 
-# Set work directory
+# Définir le répertoire de travail
 WORKDIR /app
 
-# Copy package.json & lockfile
+# Copier les fichiers package.json et lock pour installer les dépendances
 COPY package*.json ./
 
-# Install dependencies
+# Installer les dépendances
 RUN npm install
 
-# Copy the rest of the source code
+# Copier tout le reste du code
 COPY . .
 
-# Expose port 80 for Vite dev server
+# Construire l'application (vite ou vue-cli)
+RUN npm run build
+
+# === Stage 2 : Production ===
+FROM nginx:stable-alpine AS production-stage
+
+# Supprimer le contenu par défaut de Nginx
+RUN rm -rf /usr/share/nginx/
+
+# Copier les fichiers buildés vers le dossier HTML de Nginx
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+
+# Exposer le port 80
 EXPOSE 80
 
-# Run Vite dev server on 0.0.0.0:80
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
+# Démarrer nginx
+CMD ["nginx", "-g", "daemon off;"]
