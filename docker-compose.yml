@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   frontend:
-    build: .
+    image: saittimages.azurecr.io/saittimages/traidapp:2.0
     ports:
       - "80:80"
     volumes:
